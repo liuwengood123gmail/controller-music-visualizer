@@ -59,7 +59,15 @@ struct ContentView: View {
         HStack {
             Image(systemName: "gamecontroller.fill").font(.title2)
             VStack(alignment: .leading, spacing: 2) {
-                Text(h.status.text).font(.headline)
+                HStack(spacing: 6) {
+                    Text(h.status.text).font(.headline)
+                    if let b = h.battery {
+                        Label("\(b.level)%", systemImage: batteryIcon(b.level, charging: b.charging))
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(b.level <= 15 && !b.charging ? .red : .secondary)
+                            .help(b.charging ? L("充电中", "Charging") : L("电量", "Battery"))
+                    }
+                }
                 Text(h.running ? h.engineName.text : L("未运行", "Stopped")).font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
@@ -78,6 +86,17 @@ struct ContentView: View {
             .keyboardShortcut(.space, modifiers: [])
             .buttonStyle(.borderedProminent)
             .tint(h.running ? .red : .accentColor)
+        }
+    }
+
+    private func batteryIcon(_ level: Int, charging: Bool) -> String {
+        if charging { return "battery.100percent.bolt" }
+        switch level {
+        case ..<13: return "battery.0percent"
+        case ..<38: return "battery.25percent"
+        case ..<63: return "battery.50percent"
+        case ..<88: return "battery.75percent"
+        default: return "battery.100percent"
         }
     }
 
@@ -124,6 +143,7 @@ struct ContentView: View {
 
     private var featuresPanel: some View {
         VStack(alignment: .leading, spacing: 10) {
+            Toggle(L("HD 震动（仅 USB，更细腻）", "HD haptics (USB only, finer detail)"), isOn: $h.hdEnabled)
             slider(L("扳机阻尼", "Trigger resistance"), value: $h.triggerResistance)
             Toggle(L("用扳机调强度（R2 加强 · L2 减弱）", "Triggers adjust intensity (R2 up · L2 down)"),
                    isOn: $h.triggerAdjustsIntensity)

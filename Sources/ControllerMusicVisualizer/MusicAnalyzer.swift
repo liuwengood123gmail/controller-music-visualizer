@@ -14,6 +14,15 @@ enum MusicMode: String, CaseIterable, Identifiable {
         case .envelope: L("包络", "Envelope")
         }
     }
+
+    /// HD 震动的载波频率：节拍清脆、低音厚重、包络居中
+    var carrier: Float {
+        switch self {
+        case .beat: 160
+        case .bass: 80
+        case .envelope: 130
+        }
+    }
 }
 
 /// 分析结果：震动用的左右强度 + 灯光用的特征（灯光不受震动模式和强度影响）
@@ -55,6 +64,8 @@ final class MusicAnalyzer {
     var mode: MusicMode = .beat
     var sensitivity: Float = 0.5     // 0...1，鼓点检测灵敏度
     var responsiveness: Float = 0.7  // 0...1，震动跟随速度（尤其是声音变小时）
+    /// HD 震动用的音乐低频波形；设置后每块音频都会写进去
+    var waveform: HapticWaveform?
     var lightSpeed: Float = 0.3      // 0...1，灯条暗下去的速度：0 像呼吸灯，1 干脆地一闪一闪
 
     /// 按响应速度在「柔和」和「灵敏」两端之间取时间常数（对数插值）
@@ -185,6 +196,7 @@ final class MusicAnalyzer {
         }
 
         updateColor(left: left, right: right, frames: frames, sampleRate: sampleRate, dt: dt)
+        waveform?.write(left: left, right: right, frames: frames, sampleRate: sampleRate)
 
         // 灯光：用低音（流行音乐全频响度被压得很平，低音才随节奏起伏），
         // 减去近期底线再放大，鼓点间变暗、鼓点上冲亮

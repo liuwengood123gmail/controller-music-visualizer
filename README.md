@@ -25,17 +25,18 @@ Works with most Sony controllers: DualSense / DualSense Edge get every feature, 
 | **跟随音乐震动**：旁听系统正在播放的声音（不影响原有播放），左声道驱动左马达、右声道驱动右马达 | **Music-driven vibration**: listens to system audio (without affecting playback); left channel → left motor, right → right |
 | 三种震动模式：**节拍**（鼓点脉冲）、**低音**（跟随低频起伏）、**包络**（跟随整体音量起伏） | Three modes: **Beat** (pulses on drum hits), **Bass** (follows low frequencies), **Envelope** (follows overall loudness) |
 | **按摩**：揉捏、敲击、拍打、指压、波浪、心跳、渐强、随机 8 种预设 | **Massage**: 8 presets — Knead, Tap, Pat, Shiatsu, Wave, Heartbeat, Crescendo, Random |
+| **HD 震动（USB）**：像 PS5 一样用波形驱动马达。跟随音乐时把底鼓、贝斯的真实波形传到手上；按摩时每种预设有不同的频率质感 | **HD haptics (USB)**: drives the actuators with waveforms like a PS5. In Music mode the real kick/bass waveform reaches your hands; each massage preset has its own frequency texture |
 | **扳机阻尼**：L2/R2 可调阻力，App 在后台时依然有效 | **Trigger resistance**: adjustable L2/R2 resistance that keeps working while the app is in the background |
 | **扳机调强度**：按 R2 加强、L2 减弱，按得越深变得越快 | **Trigger intensity control**: hold R2 to increase, L2 to decrease; deeper press = faster change |
 | **灯条**：低/中/高频混合成红/绿/蓝，亮度跟随低音节奏，暗下去之后才换色 | **Light bar**: low/mid/high frequencies mixed into red/green/blue, brightness pulses with the bass, color changes only after it dims |
 | **白点电平灯**：下方 5 颗白灯显示左右声道的相对强度 | **Player LEDs**: the 5 white LEDs act as a stereo level meter |
-| USB 和蓝牙都支持；界面中英文切换 | Works over USB and Bluetooth; Chinese / English UI |
+| USB 和蓝牙都支持；显示手柄电量和充电状态；界面中英文切换 | Works over USB and Bluetooth; shows controller battery and charging state; Chinese / English UI |
 
 ## 支持的手柄 · Supported controllers
 
 | 手柄 · Controller | 支持情况 · Support |
 |---|---|
-| **DualSense（PS5）**、**DualSense Edge** | ✅ 全部功能：震动、扳机阻尼、灯条、白点电平灯，App 在后台也有效；USB / 蓝牙均可 · ✅ Everything: vibration, trigger resistance, light bar, player LEDs — also while the app is in the background; USB or Bluetooth |
+| **DualSense（PS5）**、**DualSense Edge** | ✅ 全部功能：震动、扳机阻尼、灯条、白点电平灯，App 在后台也有效；USB / 蓝牙均可，**HD 震动仅 USB** · ✅ Everything: vibration, trigger resistance, light bar, player LEDs — also while the app is in the background; USB or Bluetooth, **HD haptics over USB only** |
 | 以索尼 DualSense 身份被系统识别的兼容手柄 · Third-party controllers that identify as a Sony DualSense | ✅ 与 DualSense 相同 · ✅ Same as DualSense |
 | **DualShock 4（PS4）** 及其他 macOS 能识别、支持震动的手柄 · **DualShock 4 (PS4)** and other controllers macOS recognizes with rumble | ⚠️ 基本功能：通过 GameController 震动；DualShock 4 的灯条在 App 位于前台时可变色；没有扳机阻尼和白点电平灯 · ⚠️ Basics: vibration via GameController; the DualShock 4 light bar changes color while the app is in the foreground; no trigger resistance or player LEDs |
 
@@ -77,6 +78,7 @@ open build/ControllerMusicVisualizer.app
 | 响应速度 | 震动跟随声音的快慢（尤其是声音变小时） | Response | How quickly vibration follows the audio (especially when it gets quieter) |
 | 鼓点灵敏度 | 仅节拍模式：越高，越小的鼓点也会触发 | Beat sensitivity | Beat mode only: higher = softer hits also trigger |
 | 速度 | 按摩节奏快慢 | Speed | Massage tempo |
+| HD 震动 | 仅 USB：用波形驱动马达，更细腻；关闭则用兼容震动 | HD haptics | USB only: waveform-driven, finer detail; off = compatible rumble |
 | 扳机阻尼 | L2/R2 阻力，0 为关闭 | Trigger resistance | L2/R2 resistance; 0 = off |
 | 灯条速度 | 灯条暗下去的快慢：慢像呼吸灯，快则一闪一闪；也决定换色频率 | Light speed | How fast the light bar dims: slow = breathing, fast = flashing; also sets how often colors change |
 | 灯条起伏 | 亮暗变化幅度：100% 时鼓点间完全暗掉，越低保留的底亮度越高 | Light range | Depth of the pulsing: 100% = fully dark between beats, lower keeps a base glow |
@@ -88,11 +90,18 @@ open build/ControllerMusicVisualizer.app
 ### 整体结构 · Architecture
 
 ```
-系统声音 System audio ──► SystemAudioTap ──► MusicAnalyzer ──┐
-   (Core Audio process tap，只旁听 / listen-only)              ├─► HapticsController ──► DualSenseHID ──► 手柄 Controller
-                         MassagePreset（按摩波形 / patterns）──┘        (每 10ms / every 10 ms)     (震动 + 扳机 + 灯光 / rumble + triggers + lights)
-                                        GameController ──► 读取扳机按压 / read trigger pressure
+                                       MassagePreset ─┐        ┌── GameController (trigger input)
+                                                      ▼        ▼
+System audio ─► SystemAudioTap ─► MusicAnalyzer ─► HapticsController ─► DualSenseHID ─► triggers, lights, rumble
+ (listen-only)                        │                        │
+                                      │                        │  amplitude, every 10 ms
+                                      ▼                        ▼
+                               HapticWaveform ────────────────► HDHapticOutput ─► USB audio ch 3/4 (HD haptics)
 ```
+
+图中箭头：系统声音经采集和分析后，一路去主控制（`HapticsController`）计算强度、灯光，经 HID 报告发给手柄；另一路把音乐低频波形写进 `HapticWaveform`，由 `HDHapticOutput` 以 HD 方式输出到 USB 音频第 3/4 声道。按摩波形和扳机按压也汇入主控制。
+
+Arrows: system audio is captured and analyzed; one path goes to `HapticsController`, which computes intensity and lighting and sends HID reports; the other writes the music's low-frequency waveform into `HapticWaveform`, which `HDHapticOutput` plays to USB audio channels 3/4 as HD haptics. Massage patterns and trigger input also feed the controller.
 
 | 文件 · File | 职责 · Responsibility |
 |---|---|
@@ -100,6 +109,7 @@ open build/ControllerMusicVisualizer.app
 | `MusicAnalyzer.swift` | 滤波、相对强度、鼓点检测，输出震动强度和灯光特征 · Filtering, relative loudness, beat detection; outputs vibration and light features |
 | `MassagePatterns.swift` | 8 种按摩波形和颜色 · The 8 massage waveforms and colors |
 | `DualSenseHID.swift` | 直接发送 HID 输出报告（USB 0x02 / 蓝牙 0x31 + CRC32）· Sends raw HID output reports (USB 0x02 / Bluetooth 0x31 + CRC32) |
+| `HDHaptics.swift` | HD 震动：音乐低频波形缓冲 + 向 USB 音频第 3/4 声道输出波形 · HD haptics: music low-frequency waveform buffer + waveform output to USB audio channels 3/4 |
 | `HapticEngines.swift` | 后备方案：GameController + CoreHaptics · Fallback path: GameController + CoreHaptics |
 | `HapticsController.swift` | 主循环、引擎选择、灯光映射 · Main loop, engine selection, light mapping |
 | `App.swift` / `Localization.swift` | SwiftUI 界面、中英文切换 · SwiftUI UI and Chinese/English switching |
@@ -113,8 +123,17 @@ open build/ControllerMusicVisualizer.app
 - 如果打不开 HID 设备，会退回 GameController + CoreHaptics（注意：手柄的震动服务不支持 `CHHapticAdvancedPatternPlayer`，只能用普通 player 加动态参数）。
 - If the HID device can't be opened, the app falls back to GameController + CoreHaptics (note: the controller haptics service rejects `CHHapticAdvancedPatternPlayer`, so a plain player with dynamic parameters is used).
 
-> **关于 HD 震动 · About HD haptics**：USB 连接时 DualSense 会出现一个 4 声道音频设备（第 3/4 声道驱动震动单元，PS5 就是这样做 HD 震动的），但 macOS 驱动没有开启这个模式，写入波形不会震，所以本项目使用兼容震动。
-> Over USB the DualSense exposes a 4-channel audio device (channels 3/4 drive the actuators — this is how the PS5 does HD haptics), but the macOS driver doesn't enable that mode, so writing waveforms there does nothing. This project uses compatible rumble instead.
+### HD 震动 · HD haptics
+
+| 中文 | English |
+|---|---|
+| DualSense 的马达是音圈马达，支持两种驱动方式：**HD 震动**（直接送波形，能表现频率和质感）和**兼容震动**（只给左右各一个 0–255 的强度，固件模拟 PS4 的转子马达手感） | The DualSense uses voice-coil actuators that can be driven two ways: **HD haptics** (raw waveforms, with frequency and texture) and **compatible rumble** (one 0–255 strength per side; the firmware imitates PS4 rotating motors) |
+| USB 连接时手柄是一个 4 声道音频设备，第 3/4 声道驱动左/右马达。但只要 HID 输出报告里的兼容震动开关（flag0 的 bit0、bit1，以及新固件 flag2 的 bit2）还开着，手柄就会忽略这两个声道。macOS 的系统手柄服务一直让它们开着，所以默认用不了 HD | Over USB the controller is a 4-channel audio device and channels 3/4 drive the left/right actuators. But as long as the compatible-rumble bits in the HID output report (flag0 bits 0–1, plus flag2 bit 2 on newer firmware) are set, the controller ignores those channels — and the macOS controller service keeps them set, so HD is unavailable by default |
+| 本项目自己发送 HID 报告并关掉这些开关，再向第 3/4 声道输出波形，就在 Mac 上实现了 HD 震动；停止时恢复兼容模式，不影响其他游戏和 App | This project sends its own HID reports with those bits cleared and writes waveforms to channels 3/4, enabling HD haptics on the Mac; it restores compatible mode on stop so other games and apps are unaffected |
+| **跟随音乐**：取音乐 300Hz 以下的波形（底鼓、贝斯），按包络归一成单位幅度，再整流出高八度成分并软饱和——因为马达在 100–200Hz 最有劲，而底鼓、贝斯多在 40–100Hz。左右声道分开；强弱仍由节拍/低音/包络模式决定，低频不足时混入正弦载波 | **Music**: the waveform below 300 Hz (kick, bass) is normalized by its envelope, then an octave-up component (via rectification) is mixed in and soft-saturated — the actuators are strongest around 100–200 Hz while kick and bass sit mostly at 40–100 Hz. Left/right are kept separate; the Beat/Bass/Envelope mode still sets the dynamics, with a sine carrier blended in when there's little low end |
+| 系统声音和手柄是两个独立时钟的音频设备，中间用环形缓冲把延迟维持在约 20ms | System audio and the controller are separate audio devices with independent clocks; a ring buffer keeps the latency around 20 ms |
+| **按摩**：正弦载波，每个预设的频率随时间变化（揉捏 60–100Hz 滑动、指压按下时由 90Hz 沉到 60Hz、敲击 220Hz、心跳 50Hz……） | **Massage**: a sine carrier whose frequency changes over time per preset (Knead glides 60–100 Hz, Shiatsu sinks from 90 to 60 Hz on each press, Tap 220 Hz, Heartbeat 50 Hz…) |
+| **蓝牙 HD**：PS5 通过蓝牙用私有的 0x32 报告传输 3kHz 8 位波形（见 [SAxense](https://github.com/egormanga/SAxense)）。我们在 macOS 上试过：报告能发出去，但每次发送阻塞约 26–30ms，只能达到需要速率（约 94 包/秒）的三分之一，手柄没有震动，所以蓝牙仍使用兼容震动 | **Bluetooth HD**: over Bluetooth the PS5 streams 3 kHz 8-bit waveforms in a proprietary 0x32 report (see [SAxense](https://github.com/egormanga/SAxense)). We tried it on macOS: the reports go out, but each send blocks for ~26–30 ms, reaching only a third of the required rate (~94 packets/s), and the controller didn't vibrate — so Bluetooth stays on compatible rumble |
 
 ### 相对强度 · Relative loudness
 
@@ -140,7 +159,7 @@ We also tried coloring by spectral centroid, by the most prominent band, and by 
 ## 已知限制 · Known limitations
 
 - 触控板两侧的灯条是同一颗 RGB 灯，无法分别显示左右声道。· The light bar on both sides of the touchpad is a single RGB LED, so it can't show left and right channels separately.
-- 震动是兼容震动（强弱），不是 PS5 那种 HD 震动（波形质感）。· Vibration is compatible rumble (intensity only), not PS5-style HD haptics.
+- HD 震动只支持 USB；蓝牙连接时是兼容震动（只能调强弱）。· HD haptics work over USB only; over Bluetooth vibration is compatible rumble (intensity only).
 - 系统音量键不影响震动：采集到的是系统调音量之前的声音。· The system volume doesn't affect vibration: the tap captures audio before system volume is applied.
 
 ## 其他 · Misc

@@ -38,6 +38,33 @@ enum MassagePreset: String, CaseIterable, Identifiable {
         }
     }
 
+    /// HD 震动的载波频率（Hz），随时间变化让手感有层次：低频厚重、高频清脆
+    func carrier(_ t: Double) -> Float {
+        switch self {
+        case .knead:
+            // 跟着揉的节奏在 60–100Hz 滑动，像手掌一压一放
+            return 80 + 20 * Float(sin(2 * .pi * t / 2))
+        case .tap:
+            return 220
+        case .pat:
+            return 120
+        case .shiatsu:
+            // 每次按下从 90Hz 慢慢沉到 60Hz
+            let p = t.truncatingRemainder(dividingBy: 4)
+            return 90 - 30 * Float(min(p / 2.5, 1))
+        case .wave:
+            // 随波浪在 80–140Hz 来回扫
+            return 110 + 30 * Float(sin(2 * .pi * t / 3))
+        case .heartbeat:
+            return 50
+        case .crescendo:
+            // 由弱到强时频率也从 80Hz 升到 180Hz
+            return 80 + 100 * Float(frac(t / 6))
+        case .random:
+            return 70 + 110 * noise(t * 0.7, seed: 13)
+        }
+    }
+
     /// 灯条颜色（色相 0...1），部分预设随时间变化
     func hue(_ t: Double) -> Float {
         switch self {

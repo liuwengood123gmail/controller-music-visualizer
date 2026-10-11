@@ -17,6 +17,10 @@ final class DualSenseHID: HapticOutput {
     private let manager: IOHIDManager
     private let device: IOHIDDevice
     private let bluetooth: Bool
+    var isBluetooth: Bool { bluetooth }
+
+    /// HD 震动模式：关掉兼容震动开关，手柄改由 USB 音频第 3/4 声道的波形驱动（只有 USB 可用）
+    var hdHaptics = false { didSet { if hdHaptics != oldValue { dirty = true } } }
     private var seq: UInt8 = 0
 
     private var motorLeft: UInt8 = 0
@@ -70,6 +74,7 @@ final class DualSenseHID: HapticOutput {
     func stop() {
         motorLeft = 0; motorRight = 0; resistance = 0
         light = (0, 64, 255)   // 恢复默认蓝色
+        hdHaptics = false      // 恢复兼容震动，不影响其他游戏和 App
         playerLEDs = 0b00100
         _ = send()
     }
@@ -93,6 +98,12 @@ final class DualSenseHID: HapticOutput {
         if m != playerLEDs { playerLEDs = m; dirty = true }
     }
 
+    /// 灯光关闭时的提示状态：很暗的蓝色灯条 + 中间一颗白灯
+    func setIdleLight() {
+        setLight(0, 0.02, 0.1)
+        setPlayerLEDs(0b00100)
+    }
+
     // MARK: - 发送
 
     private func flush() {
@@ -102,7 +113,8 @@ final class DualSenseHID: HapticOutput {
     @discardableResult
     private func send() -> Bool {
         var c = [UInt8](repeating: 0, count: 47)
-        c[0] = 0x01 | 0x02 | 0x04 | 0x08   // 兼容震动、震动选择、右扳机、左扳机
+        // 兼容震动开关（bit0、bit1）：开着时手柄忽略音频声道的波形；两个都关掉才进入 HD 模式
+        c[0] = (hdHaptics ? 0 : 0x01 | 0x02) | 0x04 | 0x08   // 兼容震动、震动选择、右扳机、左扳机
         c[1] = 0x04 | 0x10                  // 灯条、玩家指示灯
         c[2] = motorRight
         c[3] = motorLeft
@@ -114,7 +126,7 @@ final class DualSenseHID: HapticOutput {
                 c[base + 2] = resistance
             }
         }
-        c[38] = 0x04                        // 新固件的兼容震动开关
+        c[38] = hdHaptics ? 0 : 0x04         // 新固件的兼容震动开关
         c[43] = playerLEDs | 0x20           // bit5：立即亮灭，不渐变
         c[44] = light.0; c[45] = light.1; c[46] = light.2
 

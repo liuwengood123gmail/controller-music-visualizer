@@ -30,6 +30,8 @@ final class HapticsController: ObservableObject {
     @Published var intensity: Float = 1
     @Published var speed: Double = 1
 
+    /// HD 震动（仅 USB）：音频声道驱动马达，跟随音乐时直接传递音乐的低频波形
+    @Published var hdEnabled = true { didSet { if running && hdEnabled != oldValue { restart() } } }
     @Published var triggerResistance: Float = 0.5
     @Published var triggerAdjustsIntensity = true
     @Published var lightSpeed: Float = 0.3 { didSet { analyzer.lightSpeed = lightSpeed } }
@@ -39,6 +41,8 @@ final class HapticsController: ObservableObject {
 
     @Published private(set) var running = false
     @Published private(set) var status = Bilingual(zh: "未连接手柄", en: "No controller")
+    /// 手柄电量（0–100）和是否在充电；读不到时为 nil。USB、蓝牙都能读
+    @Published private(set) var battery: (level: Int, charging: Bool)?
     @Published private(set) var engineName = Bilingual(zh: "—", en: "—")
     @Published private(set) var level: (Float, Float) = (0, 0)
     @Published private(set) var errorMessage: Bilingual?
@@ -50,6 +54,8 @@ final class HapticsController: ObservableObject {
     private var tapGeneration = 0
     private var output: HapticOutput?
     private var hid: DualSenseHID?
+    private var hd: HDHapticOutput?
+    private let waveform = HapticWaveform()
     private var meter: (Float, Float) = (0, 0)
     private var timer: Timer?
     private var link: Link = .none
@@ -59,6 +65,7 @@ final class HapticsController: ObservableObject {
 
     init() {
         GCController.shouldMonitorBackgroundEvents = true
+        analyzer.waveform = waveform
         let nc = NotificationCenter.default
         for name in [Notification.Name.GCControllerDidConnect, .GCControllerDidDisconnect] {
             nc.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
@@ -74,6 +81,13 @@ final class HapticsController: ObservableObject {
         GCController.startWirelessControllerDiscovery {}
         link = currentLink()
         updateStatus()
+
+        // 电量每 5 秒刷新一次（与是否在运行无关）
+        updateBattery()
+        let batteryTimer = Timer(timeInterval: 5, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.updateBattery() }
+        }
+        RunLoop.main.add(batteryTimer, forMode: .common)
 
         // 调试用：open ControllerMusicVisualizer.app --args --autostart
         if CommandLine.arguments.contains("--autostart") {
@@ -106,11 +120,21 @@ final class HapticsController: ObservableObject {
         }
     }
 
+    private func updateBattery() {
+        guard let b = controller?.battery, b.batteryState != .unknown || b.batteryLevel > 0 else {
+            if battery != nil { battery = nil }
+            return
+        }
+        let value = (level: Int((b.batteryLevel * 100).rounded()), charging: b.batteryState == .charging)
+        if battery?.level != value.level || battery?.charging != value.charging { battery = value }
+    }
+
     /// 设备列表变化。注意：本 App 创建/销毁采集用的聚合设备也会触发这里，
     /// 所以只有手柄连接方式真的变了才重启，否则会无限重启卡死主线程。
     private func devicesChanged() {
         let newLink = currentLink()
         features.attach(controller)
+        updateBattery()
         guard newLink != link else { return }
         link = newLink
         updateStatus()
@@ -135,6 +159,12 @@ final class HapticsController: ObservableObject {
         if let h = DualSenseHID.open() {
             hid = h
             output = h
+            // USB 时启用 HD 震动：音频第 3/4 声道驱动马达，HID 关掉兼容震动开关
+            if hdEnabled, !h.isBluetooth, let dev = CA.dualSenseOutputDevice(),
+               let out = try? HDHapticOutput(device: dev, waveform: waveform) {
+                hd = out
+                h.hdHaptics = true
+            }
         } else {
             do {
                 output = try RumbleHapticOutput(controller: c)
@@ -145,7 +175,8 @@ final class HapticsController: ObservableObject {
                     en: "Could not connect to the system controller haptics service (\(code)). Reconnect the controller; if that fails, run sudo killall gamecontrollerd in Terminal and press Start again.")
             }
         }
-        engineName = output?.name ?? Bilingual(zh: "震动不可用", en: "Vibration unavailable")
+        engineName = hd != nil ? Bilingual(zh: "HD 震动（USB）", en: "HD haptics (USB)")
+                               : output?.name ?? Bilingual(zh: "震动不可用", en: "Vibration unavailable")
         NSLog("ControllerMusicVisualizer engine: %@", engineName.en)
 
         if source == .music { startTap() }
@@ -207,6 +238,8 @@ final class HapticsController: ObservableObject {
         timer = nil
         tap?.stop()
         tap = nil
+        hd?.stop()   // 先停音频波形，再让 HID 恢复兼容震动
+        hd = nil
         output?.set(left: 0, right: 0)
         output?.stop()
         output = nil
@@ -259,15 +292,21 @@ final class HapticsController: ObservableObject {
         }
         l = min(max(l * intensity, 0), 1)
         r = min(max(r * intensity, 0), 1)
-        output?.set(left: l, right: r)
+        if let hd {
+            hd.set(left: l, right: r, freq: source == .music ? musicMode.carrier : preset.carrier(massageTime),
+                   useMusic: source == .music)
+            output?.set(left: 0, right: 0)   // HID 只负责扳机、灯光（并保持定期重发）
+        } else {
+            output?.set(left: l, right: r)
+        }
         level = (l, r)
 
         // 灯光用强度之前的原始数值，强度调低也照样跳
-        if lightEffects { updateLight(music) }
+        if lightEffects { updateLight(music) } else { resetLight() }   // 关闭时保持暗提示灯（值不变不会重复发送）
     }
 
     private func resetLight() {
-        if let hid { hid.setLight(0, 0.25, 1) } else { features.reset() }
+        if let hid { hid.setIdleLight() } else { features.setLight(0, 0.02, 0.1) }
     }
 
     private func updateLight(_ m: MusicFrame) {
