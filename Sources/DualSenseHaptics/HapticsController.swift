@@ -30,6 +30,9 @@ final class HapticsController: ObservableObject {
 
     @Published var triggerResistance: Float = 0.5
     @Published var triggerAdjustsIntensity = true
+    @Published var lightSpeed: Float = 0.3 { didSet { analyzer.lightSpeed = lightSpeed } }
+    /// 灯条亮暗变化幅度：1 = 鼓点间完全暗掉，越小保留的底亮度越高
+    @Published var lightRange: Float = 1
     @Published var lightEffects = true { didSet { if !lightEffects { resetLight() } } }
 
     @Published private(set) var running = false
@@ -236,6 +239,7 @@ final class HapticsController: ObservableObject {
             massageTime += Double(dt) * speed
             (l, r) = preset.sample(massageTime)
             music.level = (l, r)   // 按摩时灯光直接跟随按摩波形
+            music.meter = (l, r)
         }
         l = min(max(l * intensity, 0), 1)
         r = min(max(r * intensity, 0), 1)
@@ -251,32 +255,29 @@ final class HapticsController: ObservableObject {
     }
 
     private func updateLight(_ m: MusicFrame) {
-        let peak = max(m.level.0, m.level.1)
-        let hue: Float, saturation: Float, brightness: Float
+        let r: Float, g: Float, b: Float
         switch source {
         case .music:
-            // 颜色跟随音色：低沉 = 红/橙，中频 = 黄/绿，明亮 = 青/蓝/紫
-            hue = 0.78 * m.tone
-            // 亮度跟随响度，鼓点时冲亮并略微泛白
-            saturation = 1 - 0.15 * m.beatPulse
-            brightness = 0.03 + 0.97 * max(peak, 0.6 * m.beatPulse)
+            // 三色混合：低频红、中频绿、高频蓝，各自跟随能量（底鼓+人声=黄，人声+镲片=青，全部=白）
+            let v = (1 - lightRange) + lightRange * m.barLevel
+            (r, g, b) = (m.color.r * v, m.color.g * v, m.color.b * v)
         case .massage:
-            hue = preset.hue(massageTime)
-            saturation = 1
-            brightness = 0.15 + 0.85 * peak
+            // 预设固定颜色，亮度跟随按摩波形
+            let v = (1 - lightRange) + lightRange * (0.15 + 0.85 * max(m.level.0, m.level.1))
+            (r, g, b) = hsv(preset.hue(massageTime), 1, v)
         }
-        let (r, g, b) = hsv(hue, saturation, brightness)
         if let hid {
             hid.setLight(r, g, b)
-            hid.setPlayerLEDs(playerLEDMask(left: m.level.0, right: m.level.1))
+            hid.setPlayerLEDs(playerLEDMask(left: m.meter.0, right: m.meter.1))
         } else {
             features.setLight(r, g, b)
         }
     }
 
-    /// 下方 5 颗白灯做成从中间向两边跳的立体声电平灯：快亮慢落（像音箱的电平表），避免来回闪
+    /// 下方 5 颗白灯做成从中间向两边跳的立体声电平灯，跟随整体音量近似实时；
+    /// 只留约 80ms 的余晖防止在门槛边缘闪烁
     private func playerLEDMask(left: Float, right: Float) -> UInt8 {
-        let fall: Float = 0.02   // 每 10ms 最多下降 0.02，约 0.5 秒从满落到零
+        let fall: Float = 0.12   // 每 10ms 最多下降 0.12
         meter.0 = max(left, meter.0 - fall)
         meter.1 = max(right, meter.1 - fall)
         var mask: UInt8 = 0

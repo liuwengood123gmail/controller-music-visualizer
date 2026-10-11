@@ -78,8 +78,10 @@ struct ContentView: View {
             .pickerStyle(.segmented)
             slider("强度", value: $h.intensity, in: 0...2)
             slider("响应速度", value: $h.responsiveness)
-            slider("鼓点灵敏度", value: $h.sensitivity)
-            Text("左声道 → 左马达，右声道 → 右马达").font(.caption).foregroundStyle(.secondary)
+            if h.musicMode == .beat {
+                slider("鼓点灵敏度", value: $h.sensitivity)
+            }
+            Text("左声道 → 左马达，右声道 → 右马达。响应速度只影响震动。").font(.caption).foregroundStyle(.secondary)
         }
     }
 
@@ -112,6 +114,12 @@ struct ContentView: View {
             slider("扳机阻尼", value: $h.triggerResistance)
             Toggle("用扳机调强度（R2 加强 · L2 减弱）", isOn: $h.triggerAdjustsIntensity)
             Toggle(h.source == .music ? "灯条跟随音乐" : "灯条显示按摩颜色", isOn: $h.lightEffects)
+            if h.lightEffects {
+                if h.source == .music {
+                    slider("灯条速度", value: $h.lightSpeed)
+                }
+                slider("灯条起伏", value: $h.lightRange)
+            }
         }
     }
 
