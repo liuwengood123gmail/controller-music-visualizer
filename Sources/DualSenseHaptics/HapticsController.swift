@@ -8,6 +8,8 @@ enum Source: String, CaseIterable, Identifiable {
     case music = "跟随音乐"
     case massage = "按摩"
     var id: Self { self }
+
+    var title: String { self == .music ? L("跟随音乐", "Music") : L("按摩", "Massage") }
 }
 
 /// 当前手柄的连接方式（只用于显示）
@@ -36,11 +38,11 @@ final class HapticsController: ObservableObject {
     @Published var lightEffects = true { didSet { if !lightEffects { resetLight() } } }
 
     @Published private(set) var running = false
-    @Published private(set) var status = "未连接手柄"
-    @Published private(set) var engineName = "—"
+    @Published private(set) var status = Bilingual(zh: "未连接手柄", en: "No controller")
+    @Published private(set) var engineName = Bilingual(zh: "—", en: "—")
     @Published private(set) var level: (Float, Float) = (0, 0)
-    @Published private(set) var errorMessage: String?
-    @Published private(set) var notice: String?
+    @Published private(set) var errorMessage: Bilingual?
+    @Published private(set) var notice: Bilingual?
 
     private let analyzer = MusicAnalyzer()
     private let features = ControllerFeatures()
@@ -91,9 +93,11 @@ final class HapticsController: ObservableObject {
 
     private func updateStatus() {
         switch link {
-        case .usb: status = "DualSense · USB"
-        case .bluetooth: status = "\(controller?.vendorName ?? "手柄") · 蓝牙"
-        case .none: status = "未连接手柄"
+        case .usb: status = Bilingual(zh: "DualSense · USB", en: "DualSense · USB")
+        case .bluetooth:
+            let name = controller?.vendorName ?? "DualSense"
+            status = Bilingual(zh: "\(name) · 蓝牙", en: "\(name) · Bluetooth")
+        case .none: status = Bilingual(zh: "未连接手柄", en: "No controller")
         }
     }
 
@@ -119,7 +123,7 @@ final class HapticsController: ObservableObject {
         features.attach(controller)
 
         guard let c = controller else {
-            errorMessage = "没有找到 DualSense 手柄"
+            errorMessage = Bilingual(zh: "没有找到 DualSense 手柄", en: "No DualSense controller found")
             return
         }
         // 优先直接发 HID 报告（后台也能保持扳机阻尼/灯条）；打不开再退回 GameController
@@ -130,11 +134,14 @@ final class HapticsController: ObservableObject {
             do {
                 output = try RumbleHapticOutput(controller: c)
             } catch {
-                errorMessage = "系统的手柄震动服务连接失败（\((error as NSError).code)）。请拔插一次手柄；仍不行就在终端运行 sudo killall gamecontrollerd 重启该服务，然后重新点开始。"
+                let code = (error as NSError).code
+                errorMessage = Bilingual(
+                    zh: "系统的手柄震动服务连接失败（\(code)）。请拔插一次手柄；仍不行就在终端运行 sudo killall gamecontrollerd 重启该服务，然后重新点开始。",
+                    en: "Could not connect to the system controller haptics service (\(code)). Reconnect the controller; if that fails, run sudo killall gamecontrollerd in Terminal and press Start again.")
             }
         }
-        engineName = output?.name ?? "震动不可用"
-        NSLog("DualSenseHaptics engine: %@", engineName)
+        engineName = output?.name ?? Bilingual(zh: "震动不可用", en: "Vibration unavailable")
+        NSLog("DualSenseHaptics engine: %@", engineName.en)
 
         if source == .music { startTap() }
 
@@ -159,7 +166,9 @@ final class HapticsController: ObservableObject {
         let pending = DispatchWorkItem { [weak self] in
             MainActor.assumeIsolated {
                 guard let self, self.tapGeneration == generation, self.tap == nil else { return }
-                self.notice = "正在等待「系统录音」授权，请在弹出的对话框里点「允许」（可能出现在另一块屏幕上）"
+                self.notice = Bilingual(
+                    zh: "正在等待「系统录音」授权，请在弹出的对话框里点「允许」（可能出现在另一块屏幕上）",
+                    en: "Waiting for System Audio Recording permission. Click Allow in the dialog (it may be on another display).")
             }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8, execute: pending)
@@ -175,7 +184,9 @@ final class HapticsController: ObservableObject {
                     }
                     self.notice = nil
                     if case .failure(let failure) = result {
-                        self.errorMessage = "无法读取系统声音：\(failure)。请在 系统设置 → 隐私与安全性 → 录屏与系统录音 里允许本 App。"
+                        self.errorMessage = Bilingual(
+                            zh: "无法读取系统声音：\(failure)。请在 系统设置 → 隐私与安全性 → 录屏与系统录音 里允许本 App。",
+                            en: "Cannot read system audio: \(failure). Allow this app in System Settings → Privacy & Security → Screen & System Audio Recording.")
                     } else {
                         self.tap = t
                     }
@@ -197,7 +208,7 @@ final class HapticsController: ObservableObject {
         hid = nil
         features.reset()
         running = false
-        engineName = "—"
+        engineName = Bilingual(zh: "—", en: "—")
         level = (0, 0)
     }
 

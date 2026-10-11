@@ -3,7 +3,7 @@ import GameController
 
 /// 震动输出：左右强度 0...1
 protocol HapticOutput: AnyObject {
-    var name: String { get }
+    var name: Bilingual { get }
     func set(left: Float, right: Float)
     func stop()
 }
@@ -12,7 +12,7 @@ protocol HapticOutput: AnyObject {
 // 注：macOS 的驱动不开启 DualSense 的「音频驱动震动」，往 USB 音频第 3/4 声道写波形不会震，所以只用这条路
 
 final class RumbleHapticOutput: HapticOutput {
-    let name = "CoreHaptics 震动"
+    let name = Bilingual(zh: "CoreHaptics 震动", en: "CoreHaptics vibration")
 
     /// 每个马达一个引擎 + 一个正在播放的长连续震动
     private final class Channel {

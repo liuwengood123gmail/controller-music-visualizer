@@ -6,6 +6,14 @@ enum MusicMode: String, CaseIterable, Identifiable {
     case bass = "低音"
     case envelope = "包络"
     var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .beat: L("节拍", "Beat")
+        case .bass: L("低音", "Bass")
+        case .envelope: L("包络", "Envelope")
+        }
+    }
 }
 
 /// 分析结果：震动用的左右强度 + 灯光用的特征（灯光不受震动模式和强度影响）

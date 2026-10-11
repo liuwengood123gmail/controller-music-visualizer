@@ -12,7 +12,7 @@ import IOKit.hid
 ///   38 flag2  43 玩家指示灯（5 颗白灯）  44…46 灯条 RGB
 /// USB：0x02 + common = 48 字节；蓝牙：0x31 + 序号 + 0x10 + common + 填充 + CRC32 = 78 字节
 final class DualSenseHID: HapticOutput {
-    let name: String
+    let name: Bilingual
 
     private let manager: IOHIDManager
     private let device: IOHIDDevice
@@ -34,7 +34,8 @@ final class DualSenseHID: HapticOutput {
         self.manager = manager
         self.device = device
         self.bluetooth = bluetooth
-        self.name = bluetooth ? "直接控制（蓝牙）" : "直接控制（USB）"
+        self.name = bluetooth ? Bilingual(zh: "直接控制（蓝牙）", en: "Direct control (Bluetooth)")
+                              : Bilingual(zh: "直接控制（USB）", en: "Direct control (USB)")
     }
 
     /// 找到已连接的 DualSense（普通版 0x0CE6 / Edge 0x0DF2），优先 USB

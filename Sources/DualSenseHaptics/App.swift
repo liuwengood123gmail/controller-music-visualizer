@@ -8,7 +8,7 @@ struct DualSenseHapticsApp: App {
         Window("DualSense Haptics", id: "main") {
             ContentView()
                 .environmentObject(haptics)
-                .frame(width: 420)
+                .frame(width: 440)
                 .fixedSize()
         }
         .windowResizability(.contentSize)
@@ -17,12 +17,16 @@ struct DualSenseHapticsApp: App {
 
 struct ContentView: View {
     @EnvironmentObject var h: HapticsController
+    /// 写入 UserDefaults，L() / Bilingual 读取同一个键；变化时整个界面重绘
+    @AppStorage(Language.storageKey) private var language = Language.systemDefault.rawValue
+
+    private var labelWidth: CGFloat { language == Language.zh.rawValue ? 76 : 116 }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             header
             Picker("", selection: $h.source) {
-                ForEach(Source.allCases) { Text($0.rawValue).tag($0) }
+                ForEach(Source.allCases) { Text($0.title).tag($0) }
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -41,11 +45,11 @@ struct ContentView: View {
 
             meters
             if let notice = h.notice {
-                Label(notice, systemImage: "lock.shield").font(.callout).foregroundStyle(.orange)
+                Label(notice.text, systemImage: "lock.shield").font(.callout).foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
             }
             if let err = h.errorMessage {
-                Text(err).font(.callout).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+                Text(err.text).font(.callout).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(20)
@@ -55,12 +59,19 @@ struct ContentView: View {
         HStack {
             Image(systemName: "gamecontroller.fill").font(.title2)
             VStack(alignment: .leading, spacing: 2) {
-                Text(h.status).font(.headline)
-                Text(h.running ? h.engineName : "未运行").font(.caption).foregroundStyle(.secondary)
+                Text(h.status.text).font(.headline)
+                Text(h.running ? h.engineName.text : L("未运行", "Stopped")).font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
+            Picker("", selection: $language) {
+                ForEach(Language.allCases) { Text($0.label).tag($0.rawValue) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
             Button(action: h.toggle) {
-                Label(h.running ? "停止" : "开始", systemImage: h.running ? "stop.fill" : "play.fill")
+                Label(h.running ? L("停止", "Stop") : L("开始", "Start"),
+                      systemImage: h.running ? "stop.fill" : "play.fill")
                     .frame(width: 64)
             }
             .controlSize(.large)
@@ -72,16 +83,18 @@ struct ContentView: View {
 
     private var musicPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Picker("模式", selection: $h.musicMode) {
-                ForEach(MusicMode.allCases) { Text($0.rawValue).tag($0) }
+            Picker(L("模式", "Mode"), selection: $h.musicMode) {
+                ForEach(MusicMode.allCases) { Text($0.title).tag($0) }
             }
             .pickerStyle(.segmented)
-            slider("强度", value: $h.intensity, in: 0...2)
-            slider("响应速度", value: $h.responsiveness)
+            slider(L("强度", "Intensity"), value: $h.intensity, in: 0...2)
+            slider(L("响应速度", "Response"), value: $h.responsiveness)
             if h.musicMode == .beat {
-                slider("鼓点灵敏度", value: $h.sensitivity)
+                slider(L("鼓点灵敏度", "Beat sensitivity"), value: $h.sensitivity)
             }
-            Text("左声道 → 左马达，右声道 → 右马达。响应速度只影响震动。").font(.caption).foregroundStyle(.secondary)
+            Text(L("左声道 → 左马达，右声道 → 右马达。响应速度只影响震动。",
+                   "Left channel → left motor, right → right. Response only affects vibration."))
+                .font(.caption).foregroundStyle(.secondary)
         }
     }
 
@@ -92,7 +105,7 @@ struct ContentView: View {
                     Button { h.preset = p } label: {
                         VStack(spacing: 4) {
                             Image(systemName: p.icon).font(.title3)
-                            Text(p.rawValue).font(.caption)
+                            Text(p.title).font(.caption)
                         }
                         .frame(maxWidth: .infinity, minHeight: 44)
                     }
@@ -100,9 +113,9 @@ struct ContentView: View {
                     .tint(h.preset == p ? .accentColor : .secondary)
                 }
             }
-            slider("强度", value: $h.intensity, in: 0...2)
+            slider(L("强度", "Intensity"), value: $h.intensity, in: 0...2)
             HStack {
-                Text("速度").frame(width: 76, alignment: .leading)
+                Text(L("速度", "Speed")).frame(width: labelWidth, alignment: .leading)
                 Slider(value: $h.speed, in: 0.5...2)
                 Text(String(format: "%.1f×", h.speed)).monospacedDigit().frame(width: 40, alignment: .trailing)
             }
@@ -111,14 +124,17 @@ struct ContentView: View {
 
     private var featuresPanel: some View {
         VStack(alignment: .leading, spacing: 10) {
-            slider("扳机阻尼", value: $h.triggerResistance)
-            Toggle("用扳机调强度（R2 加强 · L2 减弱）", isOn: $h.triggerAdjustsIntensity)
-            Toggle(h.source == .music ? "灯条跟随音乐" : "灯条显示按摩颜色", isOn: $h.lightEffects)
+            slider(L("扳机阻尼", "Trigger resistance"), value: $h.triggerResistance)
+            Toggle(L("用扳机调强度（R2 加强 · L2 减弱）", "Triggers adjust intensity (R2 up · L2 down)"),
+                   isOn: $h.triggerAdjustsIntensity)
+            Toggle(h.source == .music ? L("灯条跟随音乐", "Light bar follows music")
+                                      : L("灯条显示按摩颜色", "Light bar shows massage color"),
+                   isOn: $h.lightEffects)
             if h.lightEffects {
                 if h.source == .music {
-                    slider("灯条速度", value: $h.lightSpeed)
+                    slider(L("灯条速度", "Light speed"), value: $h.lightSpeed)
                 }
-                slider("灯条起伏", value: $h.lightRange)
+                slider(L("灯条起伏", "Light range"), value: $h.lightRange)
             }
         }
     }
@@ -145,7 +161,7 @@ struct ContentView: View {
 
     private func slider(_ title: String, value: Binding<Float>, in range: ClosedRange<Float> = 0...1) -> some View {
         HStack {
-            Text(title).frame(width: 76, alignment: .leading)
+            Text(title).frame(width: labelWidth, alignment: .leading)
             Slider(value: value, in: range)
             Text("\(Int(value.wrappedValue * 100))%").monospacedDigit().frame(width: 40, alignment: .trailing)
         }

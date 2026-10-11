@@ -12,6 +12,19 @@ enum MassagePreset: String, CaseIterable, Identifiable {
     case random = "随机"
     var id: Self { self }
 
+    var title: String {
+        switch self {
+        case .knead: L("揉捏", "Knead")
+        case .tap: L("敲击", "Tap")
+        case .pat: L("拍打", "Pat")
+        case .shiatsu: L("指压", "Shiatsu")
+        case .wave: L("波浪", "Wave")
+        case .heartbeat: L("心跳", "Heartbeat")
+        case .crescendo: L("渐强", "Crescendo")
+        case .random: L("随机", "Random")
+        }
+    }
+
     var icon: String {
         switch self {
         case .knead: "hand.raised"
