@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleExecutable</key>
+	<string>DualSenseHaptics</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.liuliu.DualSenseHaptics</string>
+	<key>CFBundleName</key>
+	<string>DualSense Haptics</string>
+	<key>CFBundleDisplayName</key>
+	<string>DualSense Haptics</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.2</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>需要读取本机正在播放的声音，用来驱动手柄跟随音乐震动（只分析，不录制、不修改播放）。</string>
+</dict>
+</plist>
