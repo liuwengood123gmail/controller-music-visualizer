@@ -1,11 +1,11 @@
 import SwiftUI
 
 @main
-struct DualSenseHapticsApp: App {
+struct ControllerMusicVisualizerApp: App {
     @StateObject private var haptics = HapticsController()
 
     var body: some Scene {
-        Window("DualSense Haptics", id: "main") {
+        Window("Controller Music Visualizer", id: "main") {
             ContentView()
                 .environmentObject(haptics)
                 .frame(width: 440)

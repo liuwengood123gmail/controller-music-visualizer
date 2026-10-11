@@ -2,9 +2,9 @@
 import PackageDescription
 
 let package = Package(
-    name: "DualSenseHaptics",
+    name: "ControllerMusicVisualizer",
     platforms: [.macOS("14.2")],
     targets: [
-        .executableTarget(name: "DualSenseHaptics", path: "Sources/DualSenseHaptics")
+        .executableTarget(name: "ControllerMusicVisualizer", path: "Sources/ControllerMusicVisualizer")
     ]
 )

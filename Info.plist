@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDisplayName</key>
-	<string>DualSense Haptics</string>
+	<string>Controller Music Visualizer</string>
 	<key>CFBundleExecutable</key>
-	<string>DualSenseHaptics</string>
+	<string>ControllerMusicVisualizer</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.liuliu.DualSenseHaptics</string>
+	<string>com.liuliu.ControllerMusicVisualizer</string>
 	<key>CFBundleName</key>
-	<string>DualSense Haptics</string>
+	<string>Controller Music Visualizer</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>

@@ -75,7 +75,7 @@ final class HapticsController: ObservableObject {
         link = currentLink()
         updateStatus()
 
-        // 调试用：open DualSenseHaptics.app --args --autostart
+        // 调试用：open ControllerMusicVisualizer.app --args --autostart
         if CommandLine.arguments.contains("--autostart") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.start() }
         }
@@ -146,7 +146,7 @@ final class HapticsController: ObservableObject {
             }
         }
         engineName = output?.name ?? Bilingual(zh: "震动不可用", en: "Vibration unavailable")
-        NSLog("DualSenseHaptics engine: %@", engineName.en)
+        NSLog("ControllerMusicVisualizer engine: %@", engineName.en)
 
         if source == .music { startTap() }
 

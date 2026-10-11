@@ -1,4 +1,8 @@
-# DualSense Haptics
+# Controller Music Visualizer
+
+**手柄 · 震动 · 音乐可视化 · 触觉体验 · 手柄按摩 · PS5 / PS4 手柄 · Mac**
+
+**Gamepad · Vibration · Music visualizer · Haptic experience · Controller massage · DualSense / DualShock 4 · macOS**
 
 > **让吃灰的手柄，变成你感受音乐的新方式。**
 > 插上（或蓝牙连上）一只索尼手柄，Mac 上正在播放的任何音乐，都能在手里**摸得到**（左右马达跟着节奏震动），在眼前**看得见**（灯条随乐器变色、白灯随音量跳动）。
@@ -9,6 +13,8 @@
 适用于大部分索尼手柄：DualSense / DualSense Edge 支持全部功能，DualShock 4 等其他手柄也能用上震动（详见[支持的手柄](#支持的手柄--supported-controllers)）。跟随音乐之外，还内置按摩效果和扳机阻尼。
 
 Works with most Sony controllers: DualSense / DualSense Edge get every feature, and DualShock 4 and other controllers still get vibration (see [Supported controllers](#支持的手柄--supported-controllers)). Beyond music, it also has massage patterns and adaptive-trigger resistance.
+
+<p align="center"><img src="docs/screenshot-en.png" width="440" alt="Controller Music Visualizer — English UI"></p>
 
 ---
 
@@ -45,15 +51,15 @@ Works with most Sony controllers: DualSense / DualSense Edge get every feature, 
 ## 编译运行 · Build & Run
 
 ```bash
-git clone https://github.com/liuwengood123gmail/DualSenseHaptics.git
-cd DualSenseHaptics
+git clone https://github.com/liuwengood123gmail/controller-music-visualizer.git
+cd controller-music-visualizer
 ./build.sh
-open build/DualSenseHaptics.app
+open build/ControllerMusicVisualizer.app
 ```
 
-`build.sh` 会编译并打包成 `build/DualSenseHaptics.app`。本机有 Apple Development 证书时会用它签名（这样重新编译后系统录音权限不会丢失），否则使用临时签名。
+`build.sh` 会编译并打包成 `build/ControllerMusicVisualizer.app`。本机有 Apple Development 证书时会用它签名（这样重新编译后系统录音权限不会丢失），否则使用临时签名。
 
-`build.sh` compiles the app and packages it as `build/DualSenseHaptics.app`. If an Apple Development certificate is available it is used for signing (so the audio permission survives rebuilds); otherwise the app is ad-hoc signed.
+`build.sh` compiles the app and packages it as `build/ControllerMusicVisualizer.app`. If an Apple Development certificate is available it is used for signing (so the audio permission survives rebuilds); otherwise the app is ad-hoc signed.
 
 ## 使用方法 · Usage
 
@@ -140,4 +146,4 @@ We also tried coloring by spectral centroid, by the most prominent band, and by 
 ## 其他 · Misc
 
 - `dualsense_test.swift`：最早用来测试手柄按键、震动、灯条、自适应扳机的命令行小工具（`swiftc -swift-version 5 dualsense_test.swift -o dualsense_test && ./dualsense_test`）。· A small CLI tool from early development that tests buttons, rumble, light bar and adaptive triggers.
-- 调试：`open build/DualSenseHaptics.app --args --autostart` 启动后自动开始。· Debugging: `--autostart` starts output on launch.
+- 调试：`open build/ControllerMusicVisualizer.app --args --autostart` 启动后自动开始。· Debugging: `--autostart` starts output on launch.

@@ -20,7 +20,7 @@ final class SystemAudioTap {
         let exclude = CA.ownProcessObject().map { [$0] } ?? []
         let desc = CATapDescription(stereoGlobalTapButExcludeProcesses: exclude)
         desc.uuid = UUID()
-        desc.name = "DualSenseHaptics Tap"
+        desc.name = "ControllerMusicVisualizer Tap"
         desc.isPrivate = true
         desc.muteBehavior = CATapMuteBehavior.unmuted
         try check(AudioHardwareCreateProcessTap(desc, &tapID), "创建系统声音采集")
@@ -30,7 +30,7 @@ final class SystemAudioTap {
 
         let outputUID = CA.string(CA.defaultOutputDevice(), kAudioDevicePropertyDeviceUID) ?? ""
         let config: [String: Any] = [
-            kAudioAggregateDeviceNameKey: "DualSenseHaptics Tap",
+            kAudioAggregateDeviceNameKey: "ControllerMusicVisualizer Tap",
             kAudioAggregateDeviceUIDKey: UUID().uuidString,
             kAudioAggregateDeviceMainSubDeviceKey: outputUID,
             kAudioAggregateDeviceIsPrivateKey: true,
