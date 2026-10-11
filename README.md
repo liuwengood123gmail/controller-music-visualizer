@@ -1,8 +1,14 @@
 # DualSense Haptics
 
-让 PS5 DualSense 手柄在 Mac 上「感受」音乐：跟随本机播放的声音震动、灯条随节奏变色，还内置按摩效果、扳机阻尼。
+> **让吃灰的手柄，变成你感受音乐的新方式。**
+> 插上（或蓝牙连上）一只索尼手柄，Mac 上正在播放的任何音乐，都能在手里**摸得到**（左右马达跟着节奏震动），在眼前**看得见**（灯条随乐器变色、白灯随音量跳动）。
+>
+> **Turn the controller gathering dust into a new way to experience music.**
+> Connect a Sony controller over USB or Bluetooth, and whatever is playing on your Mac becomes something you can **feel** — the left and right motors pulse with the rhythm — and **see** — the light bar shifts color with the instruments and the white LEDs bounce with the volume.
 
-Let your PS5 DualSense controller *feel* music on a Mac: it vibrates and lights up in sync with whatever is playing, plus built-in massage patterns and adaptive-trigger resistance.
+适用于大部分索尼手柄：DualSense / DualSense Edge 支持全部功能，DualShock 4 等其他手柄也能用上震动（详见[支持的手柄](#支持的手柄--supported-controllers)）。跟随音乐之外，还内置按摩效果和扳机阻尼。
+
+Works with most Sony controllers: DualSense / DualSense Edge get every feature, and DualShock 4 and other controllers still get vibration (see [Supported controllers](#支持的手柄--supported-controllers)). Beyond music, it also has massage patterns and adaptive-trigger resistance.
 
 ---
 
@@ -19,10 +25,21 @@ Let your PS5 DualSense controller *feel* music on a Mac: it vibrates and lights 
 | **白点电平灯**：下方 5 颗白灯显示左右声道的相对强度 | **Player LEDs**: the 5 white LEDs act as a stereo level meter |
 | USB 和蓝牙都支持；界面中英文切换 | Works over USB and Bluetooth; Chinese / English UI |
 
+## 支持的手柄 · Supported controllers
+
+| 手柄 · Controller | 支持情况 · Support |
+|---|---|
+| **DualSense（PS5）**、**DualSense Edge** | ✅ 全部功能：震动、扳机阻尼、灯条、白点电平灯，App 在后台也有效；USB / 蓝牙均可 · ✅ Everything: vibration, trigger resistance, light bar, player LEDs — also while the app is in the background; USB or Bluetooth |
+| 以索尼 DualSense 身份被系统识别的兼容手柄 · Third-party controllers that identify as a Sony DualSense | ✅ 与 DualSense 相同 · ✅ Same as DualSense |
+| **DualShock 4（PS4）** 及其他 macOS 能识别、支持震动的手柄 · **DualShock 4 (PS4)** and other controllers macOS recognizes with rumble | ⚠️ 基本功能：通过 GameController 震动；DualShock 4 的灯条在 App 位于前台时可变色；没有扳机阻尼和白点电平灯 · ⚠️ Basics: vibration via GameController; the DualShock 4 light bar changes color while the app is in the foreground; no trigger resistance or player LEDs |
+
+> 已实测：DualSense（USB 和蓝牙）。其他手柄按代码逻辑应可使用，但尚未逐一实测，欢迎反馈。
+> Tested: DualSense over USB and Bluetooth. Other controllers should work according to the code paths but haven't each been tested — feedback welcome.
+
 ## 环境要求 · Requirements
 
 - macOS 14.2 或更高版本（系统声音采集接口需要）· macOS 14.2 or later (required for the system-audio tap API)
-- DualSense 或 DualSense Edge 手柄，USB 或蓝牙连接 · A DualSense or DualSense Edge controller, connected via USB or Bluetooth
+- 一只索尼手柄（推荐 DualSense / DualSense Edge），USB 或蓝牙连接 · A Sony controller (DualSense / DualSense Edge recommended), connected via USB or Bluetooth
 - Xcode 命令行工具（Swift 5.10+）· Xcode Command Line Tools (Swift 5.10+)
 
 ## 编译运行 · Build & Run

@@ -96,7 +96,12 @@ final class HapticsController: ObservableObject {
         case .usb: status = Bilingual(zh: "DualSense · USB", en: "DualSense · USB")
         case .bluetooth:
             let name = controller?.vendorName ?? "DualSense"
-            status = Bilingual(zh: "\(name) · 蓝牙", en: "\(name) · Bluetooth")
+            // 只有 DualSense 能确定是蓝牙（USB 时会出现它的音频设备）；其他手柄只显示名称
+            if controller?.extendedGamepad is GCDualSenseGamepad {
+                status = Bilingual(zh: "\(name) · 蓝牙", en: "\(name) · Bluetooth")
+            } else {
+                status = Bilingual(zh: name, en: name)
+            }
         case .none: status = Bilingual(zh: "未连接手柄", en: "No controller")
         }
     }
