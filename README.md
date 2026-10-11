@@ -28,7 +28,7 @@ Let your PS5 DualSense controller *feel* music on a Mac: it vibrates and lights 
 ## 编译运行 · Build & Run
 
 ```bash
-git clone https://github.com/<you>/DualSenseHaptics.git
+git clone https://github.com/liuwengood123gmail/DualSenseHaptics.git
 cd DualSenseHaptics
 ./build.sh
 open build/DualSenseHaptics.app
