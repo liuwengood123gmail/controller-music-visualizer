@@ -91,6 +91,9 @@ open build/ControllerMusicVisualizer.app
 
 **边玩游戏边用 · While gaming**：选「跟随音乐 → 低音」，它会跟着游戏音效（爆炸、引擎、枪声）震动；取消「App 控制扳机」，保留游戏的自适应扳机，也避免开枪、踩油门时误改强度；想要游戏自己的灯光就取消「App 控制灯光」。三项都取消就等于停止。· Use Music → Bass so vibration follows game sound effects (explosions, engines, gunfire); turn off *App controls triggers* to keep the game's adaptive triggers and avoid changing intensity when you pull the triggers; turn off *App controls lights* to keep the game's lighting. Turning all three off is the same as stopping.
 
+> 已实测：「App 控制震动」取消、灯光由 App 控制时，其他程序通过系统接口发出的震动（与游戏相同的路径）正常工作，灯条同时继续跟随音乐。
+> Tested: with *App controls vibration* off and lights controlled by the app, rumble sent by another program through the system API (the same path games use) works normally while the light bar keeps following the music.
+
 ## 设计思路 · Design
 
 ### 整体结构 · Architecture
