@@ -21,6 +21,26 @@ final class DualSenseHID: HapticOutput {
 
     /// HD 震动模式：关掉兼容震动开关，手柄改由 USB 音频第 3/4 声道的波形驱动（只有 USB 可用）
     var hdHaptics = false { didSet { if hdHaptics != oldValue { dirty = true } } }
+
+    /// 各项由 App 控制还是交给游戏。交给游戏的项不设置「生效」标志位，手柄保留游戏的设置；
+    /// 三项都交给游戏时完全不发报告。
+    /// 手柄会一直保留最后收到的设置，所以交出去的那一刻先发一次「恢复默认」再放手
+    var controlsRumble = true {
+        didSet { if controlsRumble != oldValue { releaseRumble = !controlsRumble; handedOver() } }
+    }
+    var controlsTriggers = true {
+        didSet { if controlsTriggers != oldValue { releaseTriggers = !controlsTriggers; handedOver() } }
+    }
+    var controlsLights = true {
+        didSet { if controlsLights != oldValue { releaseLights = !controlsLights; handedOver() } }
+    }
+    private var releaseRumble = false, releaseTriggers = false, releaseLights = false
+
+    /// 控制权变化后立即发送（交出的项这一次会发默认值）
+    private func handedOver() {
+        dirty = true
+        flush()
+    }
     private var seq: UInt8 = 0
 
     private var motorLeft: UInt8 = 0
@@ -98,12 +118,6 @@ final class DualSenseHID: HapticOutput {
         if m != playerLEDs { playerLEDs = m; dirty = true }
     }
 
-    /// 灯光关闭时的提示状态：很暗的蓝色灯条 + 中间一颗白灯
-    func setIdleLight() {
-        setLight(0, 0.02, 0.1)
-        setPlayerLEDs(0b00100)
-    }
-
     // MARK: - 发送
 
     private func flush() {
@@ -112,23 +126,43 @@ final class DualSenseHID: HapticOutput {
 
     @discardableResult
     private func send() -> Bool {
+        let rumble = controlsRumble || releaseRumble
+        let triggers = controlsTriggers || releaseTriggers
+        let lights = controlsLights || releaseLights
+        guard rumble || triggers || lights else { return true }   // 全部交给游戏
+
+        // 交出去的项：这一次发送默认值
+        var motors = (motorLeft, motorRight), resist = resistance, rgb = light, leds = playerLEDs
+        var hd = hdHaptics
+        if releaseRumble { motors = (0, 0); hd = false }
+        if releaseTriggers { resist = 0 }
+        if releaseLights { rgb = (0, 64, 255); leds = 0b00100 }
+        releaseRumble = false; releaseTriggers = false; releaseLights = false
+
         var c = [UInt8](repeating: 0, count: 47)
-        // 兼容震动开关（bit0、bit1）：开着时手柄忽略音频声道的波形；两个都关掉才进入 HD 模式
-        c[0] = (hdHaptics ? 0 : 0x01 | 0x02) | 0x04 | 0x08   // 兼容震动、震动选择、右扳机、左扳机
-        c[1] = 0x04 | 0x10                  // 灯条、玩家指示灯
-        c[2] = motorRight
-        c[3] = motorLeft
-        if resistance > 0 {
+        // 震动标志位兼有模式切换作用（实测）：
+        //   bit0 = 马达强度生效，bit1 = 保持兼容震动模式；两位都清零 → 手柄改用音频声道波形（HD）
+        //   交给游戏时只置 bit1：手柄留在兼容模式，马达强度由游戏决定
+        if rumble {
+            c[0] = hd ? 0 : 0x01 | 0x02
+            c[38] = hd ? 0 : 0x04     // 新固件的兼容震动开关
+        } else {
+            c[0] = 0x02
+        }
+        if triggers { c[0] |= 0x04 | 0x08 }   // 右扳机、左扳机
+        if lights { c[1] = 0x04 | 0x10 }      // 灯条、玩家指示灯
+        c[2] = motors.1
+        c[3] = motors.0
+        if triggers && resist > 0 {
             // 扳机效果 0x01：阻力，参数 = 起点、力度
             for base in [10, 21] {
                 c[base] = 0x01
                 c[base + 1] = 0x08
-                c[base + 2] = resistance
+                c[base + 2] = resist
             }
         }
-        c[38] = hdHaptics ? 0 : 0x04         // 新固件的兼容震动开关
-        c[43] = playerLEDs | 0x20           // bit5：立即亮灭，不渐变
-        c[44] = light.0; c[45] = light.1; c[46] = light.2
+        c[43] = leds | 0x20                 // bit5：立即亮灭，不渐变
+        c[44] = rgb.0; c[45] = rgb.1; c[46] = rgb.2
 
         var report: [UInt8]
         let reportID: CFIndex

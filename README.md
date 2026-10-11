@@ -28,6 +28,7 @@ Works with most Sony controllers: DualSense / DualSense Edge get every feature, 
 | **HD 震动（USB）**：像 PS5 一样用波形驱动马达。跟随音乐时把底鼓、贝斯的真实波形传到手上；按摩时每种预设有不同的频率质感 | **HD haptics (USB)**: drives the actuators with waveforms like a PS5. In Music mode the real kick/bass waveform reaches your hands; each massage preset has its own frequency texture |
 | **扳机阻尼**：L2/R2 可调阻力，App 在后台时依然有效 | **Trigger resistance**: adjustable L2/R2 resistance that keeps working while the app is in the background |
 | **扳机调强度**：按 R2 加强、L2 减弱，按得越深变得越快 | **Trigger intensity control**: hold R2 to increase, L2 to decrease; deeper press = faster change |
+| **边玩游戏边用**：震动、扳机、灯光可以分别交给游戏或由 App 控制。比如游戏保留自己的自适应扳机和灯光，App 只负责跟随游戏声音震动 | **Use it while gaming**: vibration, triggers and lights can each be left to the game or controlled by the app — e.g. keep the game's adaptive triggers and lights while the app adds vibration that follows the game's audio |
 | **灯条**：低/中/高频混合成红/绿/蓝，亮度跟随低音节奏，暗下去之后才换色 | **Light bar**: low/mid/high frequencies mixed into red/green/blue, brightness pulses with the bass, color changes only after it dims |
 | **白点电平灯**：下方 5 颗白灯显示左右声道的相对强度 | **Player LEDs**: the 5 white LEDs act as a stereo level meter |
 | USB 和蓝牙都支持；显示手柄电量和充电状态；界面中英文切换 | Works over USB and Bluetooth; shows controller battery and charging state; Chinese / English UI |
@@ -78,12 +79,17 @@ open build/ControllerMusicVisualizer.app
 | 响应速度 | 震动跟随声音的快慢（尤其是声音变小时） | Response | How quickly vibration follows the audio (especially when it gets quieter) |
 | 鼓点灵敏度 | 仅节拍模式：越高，越小的鼓点也会触发 | Beat sensitivity | Beat mode only: higher = softer hits also trigger |
 | 速度 | 按摩节奏快慢 | Speed | Massage tempo |
-| HD 震动 | 仅 USB：用波形驱动马达，更细腻；关闭则用兼容震动 | HD haptics | USB only: waveform-driven, finer detail; off = compatible rumble |
-| 扳机阻尼 | L2/R2 阻力，0 为关闭 | Trigger resistance | L2/R2 resistance; 0 = off |
-| 灯条速度 | 灯条暗下去的快慢：慢像呼吸灯，快则一闪一闪；也决定换色频率 | Light speed | How fast the light bar dims: slow = breathing, fast = flashing; also sets how often colors change |
-| 灯条起伏 | 亮暗变化幅度：100% 时鼓点间完全暗掉，越低保留的底亮度越高 | Light range | Depth of the pulsing: 100% = fully dark between beats, lower keeps a base glow |
+| App 控制震动 | 取消后震动交给游戏（等于 App 不碰马达） | App controls vibration | Off = vibration is left to the game |
+| └ HD 震动 | 仅 USB：用波形驱动马达，更细腻；关闭则用兼容震动 | └ HD haptics | USB only: waveform-driven, finer detail; off = compatible rumble |
+| App 控制扳机 | 取消后扳机交给游戏：不设阻尼，R2/L2 也不再调强度 | App controls triggers | Off = triggers are left to the game: no resistance, and R2/L2 no longer adjust intensity |
+| └ 扳机阻尼 | L2/R2 阻力，0 为关闭 | └ Trigger resistance | L2/R2 resistance; 0 = off |
+| App 控制灯光 | 取消后灯条和白灯交给游戏 | App controls lights | Off = light bar and player LEDs are left to the game |
+| └ 灯条速度 | 灯条暗下去的快慢：慢像呼吸灯，快则一闪一闪；也决定换色频率 | └ Light speed | How fast the light bar dims: slow = breathing, fast = flashing; also sets how often colors change |
+| └ 灯条起伏 | 亮暗变化幅度：100% 时鼓点间完全暗掉，越低保留的底亮度越高 | └ Light range | Depth of the pulsing: 100% = fully dark between beats, lower keeps a base glow |
 
 **建议 · Tips**：想要「跟得紧、强弱明显」，选低音或包络模式，响应速度 90–100%，强度 100% 左右。· For tight, punchy vibration, use Bass or Envelope mode, Response at 90–100%, Intensity around 100%.
+
+**边玩游戏边用 · While gaming**：选「跟随音乐 → 低音」，它会跟着游戏音效（爆炸、引擎、枪声）震动；取消「App 控制扳机」，保留游戏的自适应扳机，也避免开枪、踩油门时误改强度；想要游戏自己的灯光就取消「App 控制灯光」。三项都取消就等于停止。· Use Music → Bass so vibration follows game sound effects (explosions, engines, gunfire); turn off *App controls triggers* to keep the game's adaptive triggers and avoid changing intensity when you pull the triggers; turn off *App controls lights* to keep the game's lighting. Turning all three off is the same as stopping.
 
 ## 设计思路 · Design
 

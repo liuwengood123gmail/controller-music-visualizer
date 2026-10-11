@@ -30,14 +30,36 @@ final class HapticsController: ObservableObject {
     @Published var intensity: Float = 1
     @Published var speed: Double = 1
 
+    // 以下三项：勾选 = 由 App 控制；取消 = 交给游戏（App 完全不设置这一项），方便边玩游戏边用
+
+    /// App 控制震动
+    @Published var vibrationEnabled = true {
+        didSet { if running && vibrationEnabled != oldValue { allLeftToGame ? stop() : restart() } }
+    }
     /// HD 震动（仅 USB）：音频声道驱动马达，跟随音乐时直接传递音乐的低频波形
     @Published var hdEnabled = true { didSet { if running && hdEnabled != oldValue { restart() } } }
+    /// App 控制扳机：扳机阻尼 + R2/L2 调强度
+    @Published var triggersEnabled = true {
+        didSet {
+            hid?.controlsTriggers = triggersEnabled
+            if hid == nil && !triggersEnabled { features.setTriggerResistance(0) }
+            if running && allLeftToGame { stop() }
+        }
+    }
     @Published var triggerResistance: Float = 0.5
-    @Published var triggerAdjustsIntensity = true
     @Published var lightSpeed: Float = 0.3 { didSet { analyzer.lightSpeed = lightSpeed } }
     /// 灯条亮暗变化幅度：1 = 鼓点间完全暗掉，越小保留的底亮度越高
     @Published var lightRange: Float = 1
-    @Published var lightEffects = true { didSet { if !lightEffects { resetLight() } } }
+    /// App 控制灯光（灯条 + 白灯）
+    @Published var lightEffects = true {
+        didSet {
+            hid?.controlsLights = lightEffects
+            if running && allLeftToGame { stop() }
+        }
+    }
+
+    /// 三项都交给游戏时 App 不碰手柄，等同于停止
+    var allLeftToGame: Bool { !vibrationEnabled && !triggersEnabled && !lightEffects }
 
     @Published private(set) var running = false
     @Published private(set) var status = Bilingual(zh: "未连接手柄", en: "No controller")
@@ -146,6 +168,7 @@ final class HapticsController: ObservableObject {
     func toggle() { running ? stop() : start() }
 
     func start() {
+        guard !allLeftToGame else { return }
         errorMessage = nil
         link = currentLink()
         updateStatus()
@@ -159,13 +182,16 @@ final class HapticsController: ObservableObject {
         if let h = DualSenseHID.open() {
             hid = h
             output = h
+            h.controlsRumble = vibrationEnabled
+            h.controlsTriggers = triggersEnabled
+            h.controlsLights = lightEffects
             // USB 时启用 HD 震动：音频第 3/4 声道驱动马达，HID 关掉兼容震动开关
-            if hdEnabled, !h.isBluetooth, let dev = CA.dualSenseOutputDevice(),
+            if vibrationEnabled, hdEnabled, !h.isBluetooth, let dev = CA.dualSenseOutputDevice(),
                let out = try? HDHapticOutput(device: dev, waveform: waveform) {
                 hd = out
                 h.hdHaptics = true
             }
-        } else {
+        } else if vibrationEnabled {
             do {
                 output = try RumbleHapticOutput(controller: c)
             } catch {
@@ -175,8 +201,9 @@ final class HapticsController: ObservableObject {
                     en: "Could not connect to the system controller haptics service (\(code)). Reconnect the controller; if that fails, run sudo killall gamecontrollerd in Terminal and press Start again.")
             }
         }
-        engineName = hd != nil ? Bilingual(zh: "HD 震动（USB）", en: "HD haptics (USB)")
-                               : output?.name ?? Bilingual(zh: "震动不可用", en: "Vibration unavailable")
+        engineName = !vibrationEnabled ? Bilingual(zh: "震动交给游戏", en: "Vibration left to games")
+                   : hd != nil ? Bilingual(zh: "HD 震动（USB）", en: "HD haptics (USB)")
+                   : output?.name ?? Bilingual(zh: "震动不可用", en: "Vibration unavailable")
         NSLog("ControllerMusicVisualizer engine: %@", engineName.en)
 
         if source == .music { startTap() }
@@ -243,8 +270,12 @@ final class HapticsController: ObservableObject {
         output?.set(left: 0, right: 0)
         output?.stop()
         output = nil
+        // 没有直连手柄时，扳机/灯光是通过 GameController 设置的，只重置由 App 控制的项
+        if hid == nil {
+            if triggersEnabled { features.setTriggerResistance(0) }
+            if lightEffects { features.reset() }
+        }
         hid = nil
-        features.reset()
         running = false
         engineName = Bilingual(zh: "—", en: "—")
         level = (0, 0)
@@ -263,15 +294,15 @@ final class HapticsController: ObservableObject {
         lastTick = now
         frame += 1
 
-        // 扳机：R2 加强度，L2 减强度，按得越深变得越快
-        // 在后台时系统会重置扳机/灯条，每 0.5 秒补发一次
-        if let hid {
-            hid.setTriggerResistance(triggerResistance)
-        } else {
-            if !NSApplication.shared.isActive && frame % 50 == 0 { features.invalidate() }
-            features.setTriggerResistance(triggerResistance)
-        }
-        if triggerAdjustsIntensity {
+        // 扳机（交给游戏时完全不碰）：阻尼；R2 加强度，L2 减强度，按得越深变得越快
+        if triggersEnabled {
+            if let hid {
+                hid.setTriggerResistance(triggerResistance)
+            } else {
+                // 在后台时系统会重置扳机/灯条，每 0.5 秒补发一次
+                if !NSApplication.shared.isActive && frame % 50 == 0 { features.invalidate() }
+                features.setTriggerResistance(triggerResistance)
+            }
             let (lt, rt) = features.triggers
             let dz: (Float) -> Float = { $0 < 0.05 ? 0 : $0 * $0 }
             let delta = (dz(rt) - dz(lt)) * 1.0 * dt
@@ -292,21 +323,18 @@ final class HapticsController: ObservableObject {
         }
         l = min(max(l * intensity, 0), 1)
         r = min(max(r * intensity, 0), 1)
+        if !vibrationEnabled { l = 0; r = 0 }
         if let hd {
             hd.set(left: l, right: r, freq: source == .music ? musicMode.carrier : preset.carrier(massageTime),
                    useMusic: source == .music)
             output?.set(left: 0, right: 0)   // HID 只负责扳机、灯光（并保持定期重发）
         } else {
-            output?.set(left: l, right: r)
+            output?.set(left: l, right: r)   // 震动交给游戏时 HID 不设置马达强度，这里只为定期重发扳机、灯光
         }
         level = (l, r)
 
-        // 灯光用强度之前的原始数值，强度调低也照样跳
-        if lightEffects { updateLight(music) } else { resetLight() }   // 关闭时保持暗提示灯（值不变不会重复发送）
-    }
-
-    private func resetLight() {
-        if let hid { hid.setIdleLight() } else { features.setLight(0, 0.02, 0.1) }
+        // 灯光用强度之前的原始数值，强度调低也照样跳；交给游戏时完全不碰
+        if lightEffects { updateLight(music) }
     }
 
     private func updateLight(_ m: MusicFrame) {

@@ -68,7 +68,9 @@ struct ContentView: View {
                             .help(b.charging ? L("充电中", "Charging") : L("电量", "Battery"))
                     }
                 }
-                Text(h.running ? h.engineName.text : L("未运行", "Stopped")).font(.caption).foregroundStyle(.secondary)
+                Text(h.running ? h.engineName.text
+                     : h.allLeftToGame ? L("全部交给游戏", "Everything left to games") : L("未运行", "Stopped"))
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
             Picker("", selection: $language) {
@@ -86,6 +88,7 @@ struct ContentView: View {
             .keyboardShortcut(.space, modifiers: [])
             .buttonStyle(.borderedProminent)
             .tint(h.running ? .red : .accentColor)
+            .disabled(!h.running && h.allLeftToGame)
         }
     }
 
@@ -143,19 +146,31 @@ struct ContentView: View {
 
     private var featuresPanel: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Toggle(L("HD 震动（仅 USB，更细腻）", "HD haptics (USB only, finer detail)"), isOn: $h.hdEnabled)
-            slider(L("扳机阻尼", "Trigger resistance"), value: $h.triggerResistance)
-            Toggle(L("用扳机调强度（R2 加强 · L2 减弱）", "Triggers adjust intensity (R2 up · L2 down)"),
-                   isOn: $h.triggerAdjustsIntensity)
-            Toggle(h.source == .music ? L("灯条跟随音乐", "Light bar follows music")
-                                      : L("灯条显示按摩颜色", "Light bar shows massage color"),
+            Toggle(L("App 控制震动", "App controls vibration"), isOn: $h.vibrationEnabled)
+            if h.vibrationEnabled {
+                Toggle(L("HD 震动（仅 USB，更细腻）", "HD haptics (USB only, finer detail)"), isOn: $h.hdEnabled)
+                    .padding(.leading, 20)
+            }
+            Toggle(L("App 控制扳机（阻尼 · R2 加强 / L2 减弱）", "App controls triggers (resistance · R2 up / L2 down)"),
+                   isOn: $h.triggersEnabled)
+            if h.triggersEnabled {
+                slider(L("扳机阻尼", "Trigger resistance"), value: $h.triggerResistance)
+                    .padding(.leading, 20)
+            }
+            Toggle(h.source == .music ? L("App 控制灯光（跟随音乐）", "App controls lights (follow music)")
+                                      : L("App 控制灯光（按摩颜色）", "App controls lights (massage color)"),
                    isOn: $h.lightEffects)
             if h.lightEffects {
-                if h.source == .music {
-                    slider(L("灯条速度", "Light speed"), value: $h.lightSpeed)
+                Group {
+                    if h.source == .music {
+                        slider(L("灯条速度", "Light speed"), value: $h.lightSpeed)
+                    }
+                    slider(L("灯条起伏", "Light range"), value: $h.lightRange)
                 }
-                slider(L("灯条起伏", "Light range"), value: $h.lightRange)
+                .padding(.leading, 20)
             }
+            Text(L("取消勾选的项交给游戏控制，方便边玩游戏边用。", "Unchecked items are left to the game, so you can use this while gaming."))
+                .font(.caption).foregroundStyle(.secondary)
         }
     }
 
