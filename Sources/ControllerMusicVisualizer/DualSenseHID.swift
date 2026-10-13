@@ -62,21 +62,39 @@ final class DualSenseHID: HapticOutput {
                               : Bilingual(zh: "直接控制（USB）", en: "Direct control (USB)")
     }
 
-    /// 找到已连接的 DualSense（普通版 0x0CE6 / Edge 0x0DF2），优先 USB
-    static func open() -> DualSenseHID? {
+    /// 当前连接的所有 DualSense（普通版 0x0CE6 / Edge 0x0DF2），按身份排序。
+    /// 用一个常驻的 IOHIDManager；同一台手柄出现多个 HID 接口时只保留一个
+    static func enumerate() -> [DualSenseInfo] {
+        guard let manager = sharedManager,
+              let devices = IOHIDManagerCopyDevices(manager) as? Set<IOHIDDevice> else { return [] }
+        var byKey: [String: DualSenseInfo] = [:]
+        for d in devices {
+            let transport = IOHIDDeviceGetProperty(d, kIOHIDTransportKey as CFString) as? String ?? ""
+            let location = IOHIDDeviceGetProperty(d, kIOHIDLocationIDKey as CFString) as? Int
+            let serial = IOHIDDeviceGetProperty(d, kIOHIDSerialNumberKey as CFString) as? String
+            let bluetooth = transport.localizedCaseInsensitiveContains("Bluetooth")
+            // 蓝牙才用序列号做身份；USB 用 LocationID
+            let identity = ControllerIdentity.dualSense(locationID: location, serial: bluetooth ? serial : nil)
+            let info = DualSenseInfo(device: d, manager: manager, locationID: location, bluetooth: bluetooth,
+                                     identity: identity)
+            if byKey[identity.key] == nil { byKey[identity.key] = info }
+        }
+        return byKey.values.sorted { $0.identity.key < $1.identity.key }
+    }
+
+    private static let sharedManager: IOHIDManager? = {
         let manager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
         let matching = [0x0CE6, 0x0DF2].map { [kIOHIDVendorIDKey: 0x054C, kIOHIDProductIDKey: $0] }
         IOHIDManagerSetDeviceMatchingMultiple(manager, matching as CFArray)
-        guard IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeNone)) == kIOReturnSuccess,
-              let devices = IOHIDManagerCopyDevices(manager) as? Set<IOHIDDevice> else { return nil }
+        return IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeNone)) == kIOReturnSuccess ? manager : nil
+    }()
 
-        func transport(_ d: IOHIDDevice) -> String {
-            IOHIDDeviceGetProperty(d, kIOHIDTransportKey as CFString) as? String ?? ""
-        }
-        let usb = devices.first { transport($0) == "USB" }
-        let bt = devices.first { transport($0).localizedCaseInsensitiveContains("Bluetooth") }
-        guard let device = usb ?? bt else { return nil }
-        let hid = DualSenseHID(manager: manager, device: device, bluetooth: usb == nil)
+    /// 打开指定的 DualSense 并发一次初始报告；失败返回 nil
+    static func open(_ info: DualSenseInfo) -> DualSenseHID? {
+        // 共享管理器只会打开它启动时已连接的设备；之后插入（或换口重插）的手柄能被列出来，
+        // 但没有被打开，发报告会失败、退回 GameController（后台扳机阻尼失效）。所以每次都显式打开设备
+        IOHIDDeviceOpen(info.device, IOOptionBits(kIOHIDOptionsTypeNone))
+        let hid = DualSenseHID(manager: info.manager, device: info.device, bluetooth: info.bluetooth)
         return hid.send() ? hid : nil
     }
 
@@ -139,43 +157,12 @@ final class DualSenseHID: HapticOutput {
         if releaseLights { rgb = (0, 64, 255); leds = 0b00100 }
         releaseRumble = false; releaseTriggers = false; releaseLights = false
 
-        var c = [UInt8](repeating: 0, count: 47)
-        // 震动标志位兼有模式切换作用（实测）：
-        //   bit0 = 马达强度生效，bit1 = 保持兼容震动模式；两位都清零 → 手柄改用音频声道波形（HD）
-        //   交给游戏时只置 bit1：手柄留在兼容模式，马达强度由游戏决定
-        if rumble {
-            c[0] = hd ? 0 : 0x01 | 0x02
-            c[38] = hd ? 0 : 0x04     // 新固件的兼容震动开关
-        } else {
-            c[0] = 0x02
-        }
-        if triggers { c[0] |= 0x04 | 0x08 }   // 右扳机、左扳机
-        if lights { c[1] = 0x04 | 0x10 }      // 灯条、玩家指示灯
-        c[2] = motors.1
-        c[3] = motors.0
-        if triggers && resist > 0 {
-            // 扳机效果 0x01：阻力，参数 = 起点、力度
-            for base in [10, 21] {
-                c[base] = 0x01
-                c[base + 1] = 0x08
-                c[base + 2] = resist
-            }
-        }
-        c[43] = leds | 0x20                 // bit5：立即亮灭，不渐变
-        c[44] = rgb.0; c[45] = rgb.1; c[46] = rgb.2
-
-        var report: [UInt8]
-        let reportID: CFIndex
-        if bluetooth {
-            report = [0x31, seq << 4, 0x10] + c + [UInt8](repeating: 0, count: 24) + [0, 0, 0, 0]
-            seq = (seq + 1) & 0x0F
-            let crc = crc32([0xA2] + report[0..<74])
-            for i in 0..<4 { report[74 + i] = UInt8(truncatingIfNeeded: crc >> (8 * UInt32(i))) }
-            reportID = 0x31
-        } else {
-            report = [0x02] + c
-            reportID = 0x02
-        }
+        let state = DualSenseOutputState(rumble: rumble, triggers: triggers, lights: lights, hd: hd,
+                                         motorLeft: motors.0, motorRight: motors.1, resistance: resist,
+                                         rgb: rgb, playerLEDs: leds)
+        let report = DualSenseReport.make(state, bluetooth: bluetooth, seq: seq)
+        let reportID: CFIndex = bluetooth ? 0x31 : 0x02
+        if bluetooth { seq = (seq + 1) & 0x0F }
         let ok = IOHIDDeviceSetReport(device, kIOHIDReportTypeOutput, reportID, report, report.count) == kIOReturnSuccess
         dirty = false
         lastSent = Date()
@@ -185,15 +172,66 @@ final class DualSenseHID: HapticOutput {
     private func byte(_ v: Float) -> UInt8 { UInt8(clamping: Int((min(max(v, 0), 1) * 255).rounded())) }
 }
 
-/// 标准 CRC-32（zlib 同款），蓝牙输出报告需要
-private let crcTable: [UInt32] = (0..<256).map { i in
-    var c = UInt32(i)
-    for _ in 0..<8 { c = c & 1 != 0 ? 0xEDB8_8320 ^ (c >> 1) : c >> 1 }
-    return c
+/// 一台已连接的 DualSense 在 HID 层的描述
+struct DualSenseInfo {
+    let device: IOHIDDevice
+    let manager: IOHIDManager
+    /// HID LocationID（USB 时与音频设备 UID 里的数字对应）
+    let locationID: Int?
+    let bluetooth: Bool
+    let identity: ControllerIdentity
+
+    /// 是不是同一台手柄的同一种连接（不同则需要重启输出）
+    func sameLink(as other: DualSenseInfo) -> Bool {
+        CFEqual(device, other.device) && bluetooth == other.bluetooth
+    }
 }
 
-private func crc32<S: Sequence>(_ bytes: S) -> UInt32 where S.Element == UInt8 {
-    var crc: UInt32 = 0xFFFF_FFFF
-    for b in bytes { crc = crcTable[Int((crc ^ UInt32(b)) & 0xFF)] ^ (crc >> 8) }
-    return crc ^ 0xFFFF_FFFF
+/// 读取 DualSense 的输入报告（扳机、电量）。只读，不发送任何东西；
+/// 这样 DualSense 的扳机读数不依赖 GameController，也就不用把 GCController 和 HID 设备对号。
+final class DualSenseInput {
+    private let device: IOHIDDevice
+    private let buffer: UnsafeMutablePointer<UInt8>
+    private static let bufferSize = 128
+    private let lock = NSLock()
+    private var current: DualSenseInputState?
+    private var updated = Date.distantPast
+
+    init(device: IOHIDDevice) {
+        self.device = device
+        IOHIDDeviceOpen(device, IOOptionBits(kIOHIDOptionsTypeNone))   // 同 DualSenseHID.open：换口重插的设备需要显式打开
+        buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: Self.bufferSize)
+        buffer.initialize(repeating: 0, count: Self.bufferSize)
+        IOHIDDeviceScheduleWithRunLoop(device, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
+        IOHIDDeviceRegisterInputReportCallback(device, buffer, Self.bufferSize, { context, _, _, _, reportID, report, length in
+            guard let context else { return }
+            let me = Unmanaged<DualSenseInput>.fromOpaque(context).takeUnretainedValue()
+            let bytes = Array(UnsafeBufferPointer(start: report, count: length))
+            me.handle(reportID: reportID, bytes: bytes)
+        }, Unmanaged.passUnretained(self).toOpaque())
+    }
+
+    deinit {
+        IOHIDDeviceRegisterInputReportCallback(device, buffer, Self.bufferSize, nil, nil)
+        IOHIDDeviceUnscheduleFromRunLoop(device, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
+        buffer.deallocate()
+    }
+
+    /// 最近一次解析出的状态；还没收到过报告（例如蓝牙下尚未发过输出报告）时为 nil
+    var state: DualSenseInputState? {
+        lock.lock(); defer { lock.unlock() }
+        return current
+    }
+
+    /// 0.5 秒内收到过输入报告时的状态。手柄持续上报输入，收不到通常是没有「输入监控」权限，
+    /// 这时扳机读数应退回 GameController
+    var freshState: DualSenseInputState? {
+        lock.lock(); defer { lock.unlock() }
+        return Date().timeIntervalSince(updated) < 0.5 ? current : nil
+    }
+
+    private func handle(reportID: UInt32, bytes: [UInt8]) {
+        guard let s = DualSenseReport.parseInput(reportID: reportID, bytes: bytes) else { return }
+        lock.lock(); current = s; updated = Date(); lock.unlock()
+    }
 }

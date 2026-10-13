@@ -5,6 +5,8 @@ let package = Package(
     name: "ControllerMusicVisualizer",
     platforms: [.macOS("14.2")],
     targets: [
-        .executableTarget(name: "ControllerMusicVisualizer", path: "Sources/ControllerMusicVisualizer")
+        .executableTarget(name: "ControllerMusicVisualizer", path: "Sources/ControllerMusicVisualizer"),
+        .testTarget(name: "ControllerMusicVisualizerTests", dependencies: ["ControllerMusicVisualizer"],
+                    path: "Tests/ControllerMusicVisualizerTests")
     ]
 )

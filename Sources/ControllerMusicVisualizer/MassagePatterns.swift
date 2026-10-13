@@ -1,7 +1,7 @@
 import Foundation
 
 /// 内置按摩效果：输入时间（已乘速度），输出左右强度 0...1、灯条颜色、HD 载波频率范围
-enum MassagePreset: String, CaseIterable, Identifiable {
+enum MassagePreset: String, Codable, CaseIterable, Identifiable {
     case knead = "揉捏"
     case tap = "敲击"
     case pat = "拍打"
