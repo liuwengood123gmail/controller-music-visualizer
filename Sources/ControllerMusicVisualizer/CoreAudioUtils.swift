@@ -46,11 +46,15 @@ enum CA {
         return abl.reduce(0) { $0 + Int($1.mNumberChannels) }
     }
 
-    /// USB 连接时，DualSense 会出现一个 4 声道输出设备（第 3/4 声道 = 左/右震动单元）
-    static func dualSenseOutputDevice() -> AudioObjectID? {
+    /// USB 连接时，DualSense 会出现一个 4 声道输出设备（第 3/4 声道 = 左/右震动单元）。
+    /// 给出 HID 的 LocationID 时按音频设备 UID 精确匹配（同时连多个 DualSense 时不会选错）
+    static func dualSenseOutputDevice(locationID: Int? = nil) -> AudioObjectID? {
         deviceIDs().first {
-            (string($0, kAudioObjectPropertyName) ?? "").localizedCaseInsensitiveContains("DualSense")
-                && outputChannelCount($0) >= 4
+            guard (string($0, kAudioObjectPropertyName) ?? "").localizedCaseInsensitiveContains("DualSense"),
+                  outputChannelCount($0) >= 4 else { return false }
+            guard let locationID else { return true }
+            guard let uid = string($0, kAudioDevicePropertyDeviceUID) else { return false }
+            return DualSenseAudioMatch.matches(uid: uid, locationID: locationID)
         }
     }
 

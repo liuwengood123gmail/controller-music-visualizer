@@ -1,7 +1,7 @@
 import Foundation
 import os
 
-enum MusicMode: String, CaseIterable, Identifiable {
+enum MusicMode: String, Codable, CaseIterable, Identifiable {
     case beat = "节拍"
     case bass = "低音"
     case envelope = "包络"
@@ -26,19 +26,21 @@ enum MusicMode: String, CaseIterable, Identifiable {
     }
 }
 
-/// 分析结果：震动用的左右强度 + 灯光用的特征（灯光不受震动模式和强度影响）
+/// 分析结果：只含与具体手柄无关的原始特征。每个手柄的会话再按自己的设置
+///（模式、响应速度、鼓点灵敏度、灯条速度…）整形成震动和灯光，见 Shaping.swift
 struct MusicFrame {
-    var vibration: (Float, Float) = (0, 0)
+    /// 低音能量（自动增益后 0...1，左右）
+    var bass: (Float, Float) = (0, 0)
+    /// 低音的相对强度（左右）：按分贝记住近 2 秒的最小、最大音量，把当前音量映射到两者之间，0...1，未平滑
+    var bassRelative: (Float, Float) = (0, 0)
+    /// 全频的相对强度（左右），0...1，未平滑
+    var fullRelative: (Float, Float) = (0, 0)
     /// 灯光亮度（左右），0...1：低音能量减去近期「暗部底线」后放大，鼓点间会明显变暗
-    var level: (Float, Float) = (0, 0)
+    var light: (Float, Float) = (0, 0)
     /// 白点电平（左右），0...1：当前音量在近 2 秒最小～最大音量之间的相对位置（分贝），近似实时
     var meter: (Float, Float) = (0, 0)
-    /// 鼓点脉冲，鼓点瞬间为 1，随后衰减
-    var beatPulse: Float = 0
-    /// 灯条颜色：低频 → 红、中频 → 绿、高频 → 蓝，三路各自按能量混合，0...1
+    /// 灯条颜色（未锁定）：低频 → 红、中频 → 绿、高频 → 蓝，三路各自按能量混合，0...1
     var color: (r: Float, g: Float, b: Float) = (0, 0, 0)
-    /// 灯条亮度 0...1（低音起伏，已按灯条速度平滑）；color 是已锁定的颜色，最亮通道 = 1
-    var barLevel: Float = 0
 }
 
 /// 相对强度：按分贝记住近 2 秒的最小、最大音量，把当前音量映射到两者之间（0...1）。
@@ -60,19 +62,10 @@ struct RelativeLevel {
     }
 }
 
-/// 把左右声道的音频变成震动强度和灯光特征
+/// 把左右声道的音频变成震动和灯光的原始特征。只有一份，所有手柄共用（在音频线程运行）
 final class MusicAnalyzer {
-    var mode: MusicMode = .beat
-    var sensitivity: Float = 0.5     // 0...1，鼓点检测灵敏度
-    var responsiveness: Float = 0.7  // 0...1，震动跟随速度（尤其是声音变小时）
     /// HD 震动用的音乐低频波形；设置后每块音频都会写进去
     var waveform: HapticWaveform?
-    var lightSpeed: Float = 0.3      // 0...1，灯条暗下去的速度：0 像呼吸灯，1 干脆地一闪一闪
-
-    /// 按响应速度在「柔和」和「灵敏」两端之间取时间常数（对数插值）
-    private func tau(soft: Float, fast: Float) -> Float {
-        soft * powf(fast / soft, responsiveness)
-    }
 
     private let output = OSAllocatedUnfairLock(initialState: MusicFrame())
     var current: MusicFrame { output.withLock { $0 } }
@@ -80,59 +73,29 @@ final class MusicAnalyzer {
     // 分析状态（只在音频线程访问）
     private var lp1: [Float] = [0, 0], lp2: [Float] = [0, 0]
     private var bassPeak: [Float] = [1e-3, 1e-3]
-    private var fullPeak: [Float] = [1e-3, 1e-3]
-    private var vibSmooth: [Float] = [0, 0]
     private var lightSmooth: [Float] = [0, 0]
     private var lightFloor: [Float] = [0, 0]
     private var meterLevel = [RelativeLevel(), RelativeLevel()]
-    private var vibLevel = [RelativeLevel(), RelativeLevel()]
-    private var beatAvg: Float = 0
-    private var beatPulse: Float = 0
-    private var sinceBeat: Float = 1
+    private var bassLevel = [RelativeLevel(), RelativeLevel()]
     // 颜色：单声道三频段（<250 / 250–2500 / >2500 Hz），参考 audio-reactive-led-strip 的 energy 效果
     private var colorLP: [Float] = [0, 0, 0, 0]       // 250Hz、2500Hz 各两级一阶低通
     private var colorPeak: [Float] = [1e-3, 1e-3, 1e-3]
     private var colorSmooth: [Float] = [0, 0, 0]
     private var colorFloor: [Float] = [0, 0, 0]
     private var colorOut: [Float] = [0, 0, 0]
-    // 离散换色：亮着时颜色锁定，暗到阈值以下后，下一次亮起时才按「点亮它的声音」换色
-    private var lit = false
-    private var barSmooth: Float = 0
-    private var litTime: Float = 0
-    private var falling = false
-    private var latched: [Float] = [0, 0, 1]
-    private var lightColor: [Float] = [0, 0, 0]
-    private static let darkThreshold: Float = 0.12   // 低于它算暗了
-    private static let litThreshold: Float = 0.25    // 高于它算重新亮起（两个门槛防止在边缘来回换色）
 
     func reset() {
         lp1 = [0, 0]; lp2 = [0, 0]
-        bassPeak = [1e-3, 1e-3]; fullPeak = [1e-3, 1e-3]
-        vibSmooth = [0, 0]; lightSmooth = [0, 0]; lightFloor = [0, 0]
-        meterLevel = [RelativeLevel(), RelativeLevel()]; vibLevel = [RelativeLevel(), RelativeLevel()]
-        beatAvg = 0; beatPulse = 0; sinceBeat = 1
+        bassPeak = [1e-3, 1e-3]
+        lightSmooth = [0, 0]; lightFloor = [0, 0]
+        meterLevel = [RelativeLevel(), RelativeLevel()]; bassLevel = [RelativeLevel(), RelativeLevel()]
         colorLP = [0, 0, 0, 0]; colorPeak = [1e-3, 1e-3, 1e-3]; colorSmooth = [0, 0, 0]; colorFloor = [0, 0, 0]; colorOut = [0, 0, 0]
-        lit = false; barSmooth = 0; litTime = 0; falling = false; latched = [0, 0, 1]; lightColor = [0, 0, 0]
         output.withLock { $0 = MusicFrame() }
     }
 
     /// 灯光用的固定快速平滑（不受响应速度影响）：起 3ms、落 60ms，近似实时又不闪烁
-    /// 灯条用：按「灯条速度」在 慢（起 20ms、落 300ms）和 快（起 3ms、落 60ms）之间取值
-    private func followBar(_ current: Float, _ target: Float, dt: Float) -> Float {
-        let rise = 0.02 * powf(0.15, lightSpeed), fall = 0.3 * powf(0.2, lightSpeed)
-        let t = target > current ? rise : fall
-        return current + (target - current) * (1 - expf(-dt / t))
-    }
-
     private func followLight(_ current: Float, _ target: Float, dt: Float) -> Float {
         let t: Float = target > current ? 0.003 : 0.06
-        return current + (target - current) * (1 - expf(-dt / t))
-    }
-
-    /// 震动用：快起、按响应速度回落的平滑
-    private func follow(_ current: Float, _ target: Float, dt: Float) -> Float {
-        // 上升：15ms → 5ms；下降：250ms → 30ms
-        let t = target > current ? tau(soft: 0.015, fast: 0.005) : tau(soft: 0.25, fast: 0.03)
         return current + (target - current) * (1 - expf(-dt / t))
     }
 
@@ -162,39 +125,14 @@ final class MusicAnalyzer {
             peak = max(rms, peak * peakDecay, 1e-3)
             return rms < 1e-4 ? 0 : min(rms / peak, 1)
         }
-        var bass: [Float] = [0, 0], full: [Float] = [0, 0]
+        var bass: [Float] = [0, 0]
         for c in 0..<2 {
             bass[c] = normalize(bassRMS[c], &bassPeak[c])
-            full[c] = normalize(fullRMS[c], &fullPeak[c])
         }
 
-        // 鼓点检测（一直运行，节拍震动和灯光都用）：低音能量突然高于近期平均
-        let mono = (bass[0] + bass[1]) / 2
-        let threshold = 2.2 - 1.2 * sensitivity          // 灵敏度 0 → 2.2 倍，1 → 1.0 倍
-        let minLevel = 0.45 - 0.25 * sensitivity
-        sinceBeat += dt
-        if mono > beatAvg * threshold && mono > minLevel && sinceBeat > 0.12 {
-            beatPulse = 1
-            sinceBeat = 0
-        }
-        beatAvg += (mono - beatAvg) * (1 - expf(-dt / 0.4))
-        beatPulse *= expf(-dt / tau(soft: 0.15, fast: 0.04))
-
-        // 震动
-        var vib: [Float] = [0, 0]
-        switch mode {
-        case .beat:
-            let maxB = max(bass[0], bass[1], 1e-3)
-            vib = [beatPulse * bass[0] / maxB, beatPulse * bass[1] / maxB]
-        case .bass, .envelope:
-            // 相对强度（不受歌曲本身音量影响），平方加大对比，再按响应速度平滑
-            let src = mode == .bass ? bassRMS : fullRMS
-            for c in 0..<2 {
-                let rel = vibLevel[c].update(rms: src[c], dt: dt)
-                vibSmooth[c] = follow(vibSmooth[c], rel * rel, dt: dt)
-                vib[c] = vibSmooth[c]
-            }
-        }
+        // 低音 / 全频的相对强度（各手柄自己决定用哪个、怎么平滑）
+        var bassRel: [Float] = [0, 0]
+        for c in 0..<2 { bassRel[c] = bassLevel[c].update(rms: bassRMS[c], dt: dt) }
 
         updateColor(left: left, right: right, frames: frames, sampleRate: sampleRate, dt: dt)
         waveform?.write(left: left, right: right, frames: frames, sampleRate: sampleRate)
@@ -216,42 +154,17 @@ final class MusicAnalyzer {
         var meterOut: [Float] = [0, 0]
         for c in 0..<2 { meterOut[c] = meterLevel[c].update(rms: fullRMS[c], dt: dt) }
 
-        // 灯条：亮度跟随低音起伏（鼓点间会暗下去）；颜色只在「暗 → 亮」的瞬间按当时的三频段混合选定，亮着时保持
-        // 先用快速跟随算出起伏，最后再按「灯条速度」平滑：调慢时两拍之间来不及暗透，像呼吸灯
-        let previous = barSmooth
-        barSmooth = followBar(barSmooth, max(light[0], light[1]), dt: dt)
-        let brightness = barSmooth
-
-        func latch() {
-            if let m = colorOut.max(), m > 1e-3 { latched = colorOut.map { $0 / m } }   // 归一到最亮 = 1
-            litTime = 0
-        }
-        if lit {
-            litTime += dt
-            let trough = falling && brightness > previous   // 刚从下降转为上升 = 波谷
-            if brightness < Self.darkThreshold {
-                lit = false
-            } else if litTime > 2, trough, brightness < 0.6 {
-                latch()   // 慢速度下一直没暗透：连续亮 2 秒后，在下一个波谷换色
-            }
-        } else if brightness > Self.litThreshold {
-            lit = true
-            latch()
-        }
-        falling = brightness < previous
-        lightColor = latched
-
-        let frame = MusicFrame(vibration: (vib[0], vib[1]),
-                               level: (light[0], light[1]),
+        let frame = MusicFrame(bass: (bass[0], bass[1]),
+                               bassRelative: (bassRel[0], bassRel[1]),
+                               fullRelative: (meterOut[0], meterOut[1]),
+                               light: (light[0], light[1]),
                                meter: (meterOut[0], meterOut[1]),
-                               beatPulse: beatPulse,
-                               color: (lightColor[0], lightColor[1], lightColor[2]),
-                               barLevel: brightness)
+                               color: (colorOut[0], colorOut[1], colorOut[2]))
         output.withLock { $0 = frame }
     }
 
     /// 低/中/高三段能量 → 红/绿/蓝。每段按自己近几秒的峰值归一（不会被低音盖住），
-    /// 平方加大对比，再按响应速度平滑：几乎没有延迟，鼓点闪红、人声泛绿、镲片泛蓝
+    /// 平方加大对比，再用固定的快速平滑：几乎没有延迟，鼓点闪红、人声泛绿、镲片泛蓝
     private func updateColor(left: UnsafePointer<Float>, right: UnsafePointer<Float>,
                              frames: Int, sampleRate: Float, dt: Float) {
         let kLow = 1 - expf(-2 * .pi * 250 / sampleRate)
