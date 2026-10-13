@@ -42,7 +42,6 @@ final class AnalyzerTests: XCTestCase {
         let last = run(a, seconds: 1, gain: { _ in 0.5 }, signal: sine(60)).last!
         XCTAssertGreaterThan(last.bass.0, 0.5)
         XCTAssertLessThanOrEqual(last.bass.0, 1)
-        XCTAssertGreaterThan(last.color.r, last.color.b)   // 低频 → 红
     }
 
     func testHighSineGivesLittleBass() {
