@@ -91,6 +91,9 @@ final class DualSenseHID: HapticOutput {
 
     /// 打开指定的 DualSense 并发一次初始报告；失败返回 nil
     static func open(_ info: DualSenseInfo) -> DualSenseHID? {
+        // 共享管理器只会打开它启动时已连接的设备；之后插入（或换口重插）的手柄能被列出来，
+        // 但没有被打开，发报告会失败、退回 GameController（后台扳机阻尼失效）。所以每次都显式打开设备
+        IOHIDDeviceOpen(info.device, IOOptionBits(kIOHIDOptionsTypeNone))
         let hid = DualSenseHID(manager: info.manager, device: info.device, bluetooth: info.bluetooth)
         return hid.send() ? hid : nil
     }
@@ -192,9 +195,11 @@ final class DualSenseInput {
     private static let bufferSize = 128
     private let lock = NSLock()
     private var current: DualSenseInputState?
+    private var updated = Date.distantPast
 
     init(device: IOHIDDevice) {
         self.device = device
+        IOHIDDeviceOpen(device, IOOptionBits(kIOHIDOptionsTypeNone))   // 同 DualSenseHID.open：换口重插的设备需要显式打开
         buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: Self.bufferSize)
         buffer.initialize(repeating: 0, count: Self.bufferSize)
         IOHIDDeviceScheduleWithRunLoop(device, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
@@ -218,8 +223,15 @@ final class DualSenseInput {
         return current
     }
 
+    /// 0.5 秒内收到过输入报告时的状态。手柄持续上报输入，收不到通常是没有「输入监控」权限，
+    /// 这时扳机读数应退回 GameController
+    var freshState: DualSenseInputState? {
+        lock.lock(); defer { lock.unlock() }
+        return Date().timeIntervalSince(updated) < 0.5 ? current : nil
+    }
+
     private func handle(reportID: UInt32, bytes: [UInt8]) {
         guard let s = DualSenseReport.parseInput(reportID: reportID, bytes: bytes) else { return }
-        lock.lock(); current = s; lock.unlock()
+        lock.lock(); current = s; updated = Date(); lock.unlock()
     }
 }

@@ -246,8 +246,8 @@ final class ControllerSession: ObservableObject, Identifiable {
     // MARK: - 每 10ms 计算一次
 
     private var triggerReadings: (left: Float, right: Float) {
-        if let s = input?.state { return (s.l2, s.r2) }
-        return features.triggers
+        if let s = input?.freshState { return (s.l2, s.r2) }
+        return features.triggers   // 收不到 HID 输入报告（例如没有输入监控权限）时用 GameController
     }
 
     func tick(music: MusicFrame, dt: Float, count: Int) {
