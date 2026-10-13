@@ -41,8 +41,10 @@ Works with most Sony controllers: DualSense / DualSense Edge get every feature, 
 | 以索尼 DualSense 身份被系统识别的兼容手柄 · Third-party controllers that identify as a Sony DualSense | ✅ 与 DualSense 相同 · ✅ Same as DualSense |
 | **DualShock 4（PS4）** 及其他 macOS 能识别、支持震动的手柄 · **DualShock 4 (PS4)** and other controllers macOS recognizes with rumble | ⚠️ 基本功能：通过 GameController 震动；DualShock 4 的灯条在 App 位于前台时可变色；没有扳机阻尼和白点电平灯 · ⚠️ Basics: vibration via GameController; the DualShock 4 light bar changes color while the app is in the foreground; no trigger resistance or player LEDs |
 
-> 已实测：DualSense（USB 和蓝牙）。其他手柄按代码逻辑应可使用，但尚未逐一实测，欢迎反馈。
-> Tested: DualSense over USB and Bluetooth. Other controllers should work according to the code paths but haven't each been tested — feedback welcome.
+| **8BitDo Lite 2**（S 模式，即 Switch 模式） · **8BitDo Lite 2** (S / Switch mode) | ⚠️ 已实测：被识别为 Switch Pro 手柄，能震动（左右分开），力度偏弱（小转子马达）；没有灯条和扳机效果。其他模式下 macOS 无法让它震动 · ⚠️ Tested: recognized as a Switch Pro Controller; vibration works (left/right separately) but is weak (small rotating motors); no light bar or trigger effects. In its other modes macOS can't drive its rumble |
+
+> 已实测：DualSense（USB 和蓝牙）、8BitDo Lite 2（S 模式）。其他手柄按代码逻辑应可使用，但尚未逐一实测，欢迎反馈。
+> Tested: DualSense over USB and Bluetooth, 8BitDo Lite 2 in S mode. Other controllers should work according to the code paths but haven't each been tested — feedback welcome.
 
 ## 环境要求 · Requirements
 

@@ -25,9 +25,13 @@ final class RumbleHapticOutput: HapticOutput {
 
     /// 单段连续震动的长度；快播完时重新开一段
     private static let segment: TimeInterval = 60
+    /// 锐度（对应 Switch 等手柄的震动频率）：实测 DualSense 在 1 最强；
+    /// 8BitDo（Switch Pro 模式）等转子马达手柄在 0–0.5 更强
+    private let sharpness: Float
     private var channels: [Channel] = []
 
     init(controller: GCController) throws {
+        sharpness = controller.extendedGamepad is GCDualSenseGamepad ? 1 : 0.25
         guard let haptics = controller.haptics else { throw CAError(what: "手柄不支持震动", status: -1) }
         let split = haptics.supportedLocalities.contains(.leftHandle) && haptics.supportedLocalities.contains(.rightHandle)
         let localities: [GCHapticsLocality] = split ? [.leftHandle, .rightHandle] : [.default]
@@ -62,7 +66,7 @@ final class RumbleHapticOutput: HapticOutput {
     private func makeContinuousPlayer(_ engine: CHHapticEngine) -> CHHapticPatternPlayer? {
         let event = CHHapticEvent(eventType: .hapticContinuous,
                                   parameters: [CHHapticEventParameter(parameterID: .hapticIntensity, value: 1),
-                                               CHHapticEventParameter(parameterID: .hapticSharpness, value: 1)],
+                                               CHHapticEventParameter(parameterID: .hapticSharpness, value: sharpness)],
                                   relativeTime: 0, duration: Self.segment)
         let control = CHHapticDynamicParameter(parameterID: .hapticIntensityControl, value: 0, relativeTime: 0)
         guard let pattern = try? CHHapticPattern(events: [event], parameters: [control]) else { return nil }
