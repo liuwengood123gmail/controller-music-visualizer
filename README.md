@@ -24,7 +24,7 @@ Works with most Sony controllers: DualSense / DualSense Edge get every feature, 
 |---|---|
 | **跟随音乐震动**：旁听系统正在播放的声音（不影响原有播放），左声道驱动左马达、右声道驱动右马达 | **Music-driven vibration**: listens to system audio (without affecting playback); left channel → left motor, right → right |
 | 三种震动模式：**节拍**（鼓点脉冲）、**低音**（跟随低频起伏）、**包络**（跟随整体音量起伏） | Three modes: **Beat** (pulses on drum hits), **Bass** (follows low frequencies), **Envelope** (follows overall loudness) |
-| **按摩**：揉捏、敲击、拍打、指压、波浪、心跳、渐强、随机 8 种预设 | **Massage**: 8 presets — Knead, Tap, Pat, Shiatsu, Wave, Heartbeat, Crescendo, Random |
+| **按摩**：揉捏、敲击、拍打、指压、波浪、心跳、渐强、滚压、持续、捶背、按摩枪、呼吸、雨滴 13 种预设，外加**随机轮播**（每 8–14 秒换一种，交叉过渡） | **Massage**: 13 presets — Knead, Tap, Pat, Shiatsu, Wave, Heartbeat, Crescendo, Roll, Steady, Pound, Gun, Breathe, Rain — plus **Random**, which rotates through them every 8–14 s with crossfades |
 | **HD 震动（USB）**：像 PS5 一样用波形驱动马达。跟随音乐时把底鼓、贝斯的真实波形传到手上；按摩时每种预设有不同的频率质感 | **HD haptics (USB)**: drives the actuators with waveforms like a PS5. In Music mode the real kick/bass waveform reaches your hands; each massage preset has its own frequency texture |
 | **扳机阻尼**：L2/R2 可调阻力，App 在后台时依然有效 | **Trigger resistance**: adjustable L2/R2 resistance that keeps working while the app is in the background |
 | **扳机调强度**：按 R2 加强、L2 减弱，按得越深变得越快 | **Trigger intensity control**: hold R2 to increase, L2 to decrease; deeper press = faster change |
@@ -75,7 +75,7 @@ open build/ControllerMusicVisualizer.app
 
 | 控制项 | 作用 | Control | What it does |
 |---|---|---|---|
-| 强度 | 0–200%。超过 100% 会抬高弱震动，但强弱对比会变小 | Intensity | 0–200%. Above 100% lifts weak vibration but reduces contrast |
+| 强度 | 0–300%。超过 100% 会抬高弱震动，但强弱对比会变小 | Intensity | 0–300%. Above 100% lifts weak vibration but reduces contrast |
 | 响应速度 | 震动跟随声音的快慢（尤其是声音变小时） | Response | How quickly vibration follows the audio (especially when it gets quieter) |
 | 鼓点灵敏度 | 仅节拍模式：越高，越小的鼓点也会触发 | Beat sensitivity | Beat mode only: higher = softer hits also trigger |
 | 速度 | 按摩节奏快慢 | Speed | Massage tempo |
@@ -116,7 +116,7 @@ Arrows: system audio is captured and analyzed; one path goes to `HapticsControll
 |---|---|
 | `SystemAudioTap.swift` | 用 Core Audio process tap 旁听整机声音（`muteBehavior = unmuted`，不影响播放）· Listens to all system audio via a Core Audio process tap (unmuted; playback is untouched) |
 | `MusicAnalyzer.swift` | 滤波、相对强度、鼓点检测，输出震动强度和灯光特征 · Filtering, relative loudness, beat detection; outputs vibration and light features |
-| `MassagePatterns.swift` | 8 种按摩波形和颜色 · The 8 massage waveforms and colors |
+| `MassagePatterns.swift` | 按摩波形、颜色、HD 频率范围，随机轮播 · Massage waveforms, colors, HD frequency ranges, random rotation |
 | `DualSenseHID.swift` | 直接发送 HID 输出报告（USB 0x02 / 蓝牙 0x31 + CRC32）· Sends raw HID output reports (USB 0x02 / Bluetooth 0x31 + CRC32) |
 | `HDHaptics.swift` | HD 震动：音乐低频波形缓冲 + 向 USB 音频第 3/4 声道输出波形 · HD haptics: music low-frequency waveform buffer + waveform output to USB audio channels 3/4 |
 | `HapticEngines.swift` | 后备方案：GameController + CoreHaptics · Fallback path: GameController + CoreHaptics |
@@ -139,9 +139,9 @@ Arrows: system audio is captured and analyzed; one path goes to `HapticsControll
 | DualSense 的马达是音圈马达，支持两种驱动方式：**HD 震动**（直接送波形，能表现频率和质感）和**兼容震动**（只给左右各一个 0–255 的强度，固件模拟 PS4 的转子马达手感） | The DualSense uses voice-coil actuators that can be driven two ways: **HD haptics** (raw waveforms, with frequency and texture) and **compatible rumble** (one 0–255 strength per side; the firmware imitates PS4 rotating motors) |
 | USB 连接时手柄是一个 4 声道音频设备，第 3/4 声道驱动左/右马达。但只要 HID 输出报告里的兼容震动开关（flag0 的 bit0、bit1，以及新固件 flag2 的 bit2）还开着，手柄就会忽略这两个声道。macOS 的系统手柄服务一直让它们开着，所以默认用不了 HD | Over USB the controller is a 4-channel audio device and channels 3/4 drive the left/right actuators. But as long as the compatible-rumble bits in the HID output report (flag0 bits 0–1, plus flag2 bit 2 on newer firmware) are set, the controller ignores those channels — and the macOS controller service keeps them set, so HD is unavailable by default |
 | 本项目自己发送 HID 报告并关掉这些开关，再向第 3/4 声道输出波形，就在 Mac 上实现了 HD 震动；停止时恢复兼容模式，不影响其他游戏和 App | This project sends its own HID reports with those bits cleared and writes waveforms to channels 3/4, enabling HD haptics on the Mac; it restores compatible mode on stop so other games and apps are unaffected |
-| **跟随音乐**：取音乐 300Hz 以下的波形（底鼓、贝斯），按包络归一成单位幅度，再整流出高八度成分并软饱和——因为马达在 100–200Hz 最有劲，而底鼓、贝斯多在 40–100Hz。左右声道分开；强弱仍由节拍/低音/包络模式决定，低频不足时混入正弦载波 | **Music**: the waveform below 300 Hz (kick, bass) is normalized by its envelope, then an octave-up component (via rectification) is mixed in and soft-saturated — the actuators are strongest around 100–200 Hz while kick and bass sit mostly at 40–100 Hz. Left/right are kept separate; the Beat/Bass/Envelope mode still sets the dynamics, with a sine carrier blended in when there's little low end |
+| **跟随音乐**：取音乐 300Hz 以下的波形（底鼓、贝斯），按包络归一成单位幅度，再软饱和推高平均力度。左右声道分开；强弱仍由节拍/低音/包络模式决定，低频不足时混入正弦载波 | **Music**: the waveform below 300 Hz (kick, bass) is normalized by its envelope and soft-saturated to raise its average strength. Left/right are kept separate; the Beat/Bass/Envelope mode still sets the dynamics, with a sine carrier blended in when there's little low end |
 | 系统声音和手柄是两个独立时钟的音频设备，中间用环形缓冲把延迟维持在约 20ms | System audio and the controller are separate audio devices with independent clocks; a ring buffer keeps the latency around 20 ms |
-| **按摩**：正弦载波，每个预设的频率随时间变化（揉捏 60–100Hz 滑动、指压按下时由 90Hz 沉到 60Hz、敲击 220Hz、心跳 50Hz……） | **Massage**: a sine carrier whose frequency changes over time per preset (Knead glides 60–100 Hz, Shiatsu sinks from 90 to 60 Hz on each press, Tap 220 Hz, Heartbeat 50 Hz…) |
+| **频率随强度变化**：实测马达在 **50–65Hz** 最有劲（比兼容震动的最大值还强），低于 50Hz 反而变弱。所以正弦载波的频率随震动强度变化：弱时用较高频率（细腻），强时降到 50–55Hz（有劲），不低于 50Hz；每种音乐模式和按摩预设有自己的频率范围 | **Frequency follows intensity**: the actuators are strongest at **50–65 Hz** (stronger than compatible rumble at max) and get weaker below 50 Hz. So the sine carrier's frequency tracks intensity — higher when soft (finer), down to 50–55 Hz when strong (punchier), never below 50 Hz — with a range per music mode and massage preset |
 | **蓝牙 HD**：PS5 通过蓝牙用私有的 0x32 报告传输 3kHz 8 位波形（见 [SAxense](https://github.com/egormanga/SAxense)）。我们在 macOS 上试过：报告能发出去，但每次发送阻塞约 26–30ms，只能达到需要速率（约 94 包/秒）的三分之一，手柄没有震动，所以蓝牙仍使用兼容震动 | **Bluetooth HD**: over Bluetooth the PS5 streams 3 kHz 8-bit waveforms in a proprietary 0x32 report (see [SAxense](https://github.com/egormanga/SAxense)). We tried it on macOS: the reports go out, but each send blocks for ~26–30 ms, reaching only a third of the required rate (~94 packets/s), and the controller didn't vibrate — so Bluetooth stays on compatible rumble |
 
 ### 相对强度 · Relative loudness

@@ -109,7 +109,7 @@ struct ContentView: View {
                 ForEach(MusicMode.allCases) { Text($0.title).tag($0) }
             }
             .pickerStyle(.segmented)
-            slider(L("强度", "Intensity"), value: $h.intensity, in: 0...2)
+            slider(L("强度", "Intensity"), value: $h.intensity, in: 0...3)
             slider(L("响应速度", "Response"), value: $h.responsiveness)
             if h.musicMode == .beat {
                 slider(L("鼓点灵敏度", "Beat sensitivity"), value: $h.sensitivity)
@@ -122,7 +122,7 @@ struct ContentView: View {
 
     private var massagePanel: some View {
         VStack(alignment: .leading, spacing: 12) {
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4), spacing: 8) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 5), spacing: 6) {
                 ForEach(MassagePreset.allCases) { p in
                     Button { h.preset = p } label: {
                         VStack(spacing: 4) {
@@ -135,7 +135,11 @@ struct ContentView: View {
                     .tint(h.preset == p ? .accentColor : .secondary)
                 }
             }
-            slider(L("强度", "Intensity"), value: $h.intensity, in: 0...2)
+            if h.preset == .random, h.running, let now = h.randomNow {
+                Label(L("随机轮播 · 正在播放：", "Random · now playing: ") + now.title, systemImage: "shuffle")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            slider(L("强度", "Intensity"), value: $h.intensity, in: 0...3)
             HStack {
                 Text(L("速度", "Speed")).frame(width: labelWidth, alignment: .leading)
                 Slider(value: $h.speed, in: 0.5...2)

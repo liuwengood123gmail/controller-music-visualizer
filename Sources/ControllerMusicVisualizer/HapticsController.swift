@@ -26,7 +26,7 @@ final class HapticsController: ObservableObject {
     @Published var sensitivity: Float = 0.5 { didSet { analyzer.sensitivity = sensitivity } }
     @Published var responsiveness: Float = 0.7 { didSet { analyzer.responsiveness = responsiveness } }
     @Published var preset: MassagePreset = .knead
-    /// 0...2：超过 1 时把中低强度整体拉高，顶端削平在硬件上限
+    /// 0...3：超过 1 时把中低强度整体拉高（顶端削平在硬件上限）
     @Published var intensity: Float = 1
     @Published var speed: Double = 1
 
@@ -67,6 +67,8 @@ final class HapticsController: ObservableObject {
     @Published private(set) var battery: (level: Int, charging: Bool)?
     @Published private(set) var engineName = Bilingual(zh: "—", en: "—")
     @Published private(set) var level: (Float, Float) = (0, 0)
+    /// 随机按摩当前轮播到的预设（界面显示用）
+    @Published private(set) var randomNow: MassagePreset?
     @Published private(set) var errorMessage: Bilingual?
     @Published private(set) var notice: Bilingual?
 
@@ -111,6 +113,8 @@ final class HapticsController: ObservableObject {
         }
         RunLoop.main.add(batteryTimer, forMode: .common)
 
+        // 调试用：--massage 打开时显示按摩页
+        if CommandLine.arguments.contains("--massage") { source = .massage }
         // 调试用：open ControllerMusicVisualizer.app --args --autostart
         if CommandLine.arguments.contains("--autostart") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.start() }
@@ -306,7 +310,7 @@ final class HapticsController: ObservableObject {
             let (lt, rt) = features.triggers
             let dz: (Float) -> Float = { $0 < 0.05 ? 0 : $0 * $0 }
             let delta = (dz(rt) - dz(lt)) * 1.0 * dt
-            if delta != 0 { intensity = min(max(intensity + delta, 0), 2) }
+            if delta != 0 { intensity = min(max(intensity + delta, 0), 3) }
         }
 
         var l: Float, r: Float
@@ -318,6 +322,8 @@ final class HapticsController: ObservableObject {
         case .massage:
             massageTime += Double(dt) * speed
             (l, r) = preset.sample(massageTime)
+            let now = preset == .random ? preset.current(massageTime) : nil
+            if now != randomNow { randomNow = now }
             music.level = (l, r)   // 按摩时灯光直接跟随按摩波形
             music.meter = (l, r)
         }
@@ -325,8 +331,8 @@ final class HapticsController: ObservableObject {
         r = min(max(r * intensity, 0), 1)
         if !vibrationEnabled { l = 0; r = 0 }
         if let hd {
-            hd.set(left: l, right: r, freq: source == .music ? musicMode.carrier : preset.carrier(massageTime),
-                   useMusic: source == .music)
+            let range = source == .music ? musicMode.carrierRange : preset.carrierRange(massageTime)
+            hd.set(left: l, right: r, freq: hdFrequency(range, amplitude: max(l, r)), useMusic: source == .music)
             output?.set(left: 0, right: 0)   // HID 只负责扳机、灯光（并保持定期重发）
         } else {
             output?.set(left: l, right: r)   // 震动交给游戏时 HID 不设置马达强度，这里只为定期重发扳机、灯光
@@ -335,6 +341,12 @@ final class HapticsController: ObservableObject {
 
         // 灯光用强度之前的原始数值，强度调低也照样跳；交给游戏时完全不碰
         if lightEffects { updateLight(music) }
+    }
+
+    /// HD 载波频率随强度变化：震动弱时用高频（细腻），强时降到 50–65Hz（实测马达最有劲的区间）。
+    /// 不低于 50Hz：再低马达反而没劲
+    private func hdFrequency(_ range: (low: Float, high: Float), amplitude a: Float) -> Float {
+        max(range.high - (range.high - range.low) * powf(a, 0.7), 50)
     }
 
     private func updateLight(_ m: MusicFrame) {

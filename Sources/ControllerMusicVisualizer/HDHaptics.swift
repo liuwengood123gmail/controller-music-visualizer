@@ -57,11 +57,9 @@ final class HapticWaveform {
                 peak[c] = max(env[c], peak[c] * peakDecay, 1e-4)
                 // 除以包络得到单位幅度（正弦的峰值/平均绝对值 ≈ π/2）
                 let u = min(max(y / max(env[c] * 1.57, 1e-6), -1), 1)
-                // 底鼓、贝斯多在 40–100Hz，马达在 100–200Hz 最有劲：
-                // 整流得到高八度成分（|u| 频率翻倍，减去平均值 2/π 去掉直流），与原波形混合，
-                // 再用 tanh 软饱和推满，提高平均力度又不硬削成方波
-                let octave = 2 * (abs(u) - 0.637)
-                wave[c][idx] = tanhf(Self.drive * (0.5 * u + 0.5 * octave)) / Self.driveNorm
+                // 实测马达在低频（约 50Hz）最有劲，底鼓、贝斯本来就在这个范围，直接用原波形；
+                // tanh 软饱和把平均力度推高，又不硬削成方波
+                wave[c][idx] = tanhf(Self.drive * u) / Self.driveNorm
                 // 低频不足（如只有人声）时权重下降，HD 输出会逐渐换成正弦载波
                 weight[c][idx] = min(env[c] / (0.15 * peak[c]), 1)
             }

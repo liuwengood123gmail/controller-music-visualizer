@@ -15,12 +15,13 @@ enum MusicMode: String, CaseIterable, Identifiable {
         }
     }
 
-    /// HD 震动的载波频率：节拍清脆、低音厚重、包络居中
-    var carrier: Float {
+    /// HD 载波频率范围（Hz）：震动弱时用 high（细腻），强时降到 low。
+    /// 实测马达在 50–65Hz 最有劲（比兼容震动最大值还强），低于 50Hz 反而变弱，所以 low 不低于 50
+    var carrierRange: (low: Float, high: Float) {
         switch self {
-        case .beat: 160
-        case .bass: 80
-        case .envelope: 130
+        case .beat: (55, 120)
+        case .bass: (50, 90)
+        case .envelope: (55, 110)
         }
     }
 }
