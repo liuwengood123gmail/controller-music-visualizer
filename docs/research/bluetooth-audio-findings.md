@@ -189,6 +189,43 @@ Linux 的参照：内核 HIDP 的 [`hidp_output_report`](https://github.com/torv
 5. 为什么 Linux 链路不受 sniff 限制——需要在 Linux 上用 `btmon` 看一次连接。
 6. DS5Dongle 在 macOS 上的实际表现——需要硬件。
 
+## 6.5 本机验证结果（2026-10-13，macOS 27.0.1，Apple N1，DualSense 蓝牙）
+
+**第 1 步 `bt-hid-latency-probe`（App 已停止）：**
+
+```
+输出 0x31（78 字节，空报告）单次调用耗时：n=300 中位数 0.8 ms，p10 0.2，p90 29.9，最大 59.6
+    0.0–  7.2 ms: 154
+   21.6– 28.8 ms: 3
+   28.8– 36.0 ms: 132
+   43.2– 50.4 ms: 10
+   57.6– 64.8 ms: 1
+特征报告 0x20 GetReport 单次耗时：n=60 中位数 30.0 ms，p10 29.9，p90 45.0，最大 163.7
+特征报告 0x05 GetReport 单次耗时：n=60 中位数 30.0 ms，p10 29.7，p90 31.3，最大 60.0
+输入报告到达速率（静默，没有输出流量）：65 个/秒
+输入报告到达速率（同时连续发送输出报告）：64 个/秒
+```
+
+解读：输入报告只有 ~65/s（约每 15ms 一个），且与是否同时发送无关 → **两个方向都被同一个 ~15ms 节拍限制，强烈支持 H-S（sniff）**。输出 0x31 呈双峰（一半 <1ms 入队即返回，一半 ~30ms 等队列）→ 不是每次都等握手，H-C 可能性降低。特征报告 GetReport ~30ms ≈ 一来一回各等一个节拍。
+
+**第 2 步 PacketLogger：未能取得数据。** 命令行 `packetlogger convert -o …` 需要 root；以 sudo 运行后只记录到一条 `Disconnected from OS X Device` 注释，没有任何 HCI 包；`bluetoothd` 平时也不写日志。推测 macOS 27 需要先安装 Apple 的蓝牙日志描述文件，或改用图形界面 `File ▸ New macOS Trace`（注意：菜单名是 **New macOS Trace**，不是清单里写的 New Bluetooth Capture）。考虑到即使确认 sniff 也没有公开 API 能改，这一步暂停。
+
+**第 4 步 `l2cap-interrupt-channel-probe`：**
+
+```
+已注册通道打开通知：成功
+找到 DualSense Wireless Controller，地址 44-46-48-57-1c-6c，连接句柄 0，链路类型 255，加密模式 0，RSSI 0
+PSM 0x13 打开失败：0xe00002bc
+PSM 0x11 打开失败：0xe00002bc
+没有可用的中断通道，跳过吞吐量测试。
+```
+
+解读：系统 HID 驱动独占控制 / 中断通道，IOBluetooth 打不开（kIOReturnError），也拿不到连接句柄 / RSSI → **方向 C 不可行**（在不让系统 HID 驱动放手的前提下）。
+
+运行注意：命令行程序调用 IOBluetooth 会被 TCC 以「缺少 NSBluetoothAlwaysUsageDescription」终止（看的是负责进程的 Info.plist，嵌入 `__info_plist` 段也不行）；需要把程序打包成带 Info.plist 的 `.app`，用 `open -W --stdout … --stderr … X.app` 启动。
+
+**结论（本机）：** 蓝牙链路被锁在 ~15ms 节拍、通道被系统独占、没有公开 API 调整链路 → 软件路线下蓝牙扬声器 / 蓝牙 HD 震动不可行；剩下的只有低码率长帧退路（高延迟、无法与 Mac 音响同步）和硬件转接器（DS5Dongle）。
+
 ## 7. 本次交付的文件
 
 | 文件 | 用途 |
