@@ -31,6 +31,7 @@ Works with most Sony controllers: DualSense / DualSense Edge get every feature, 
 | **边玩游戏边用**：震动、扳机、灯光可以分别交给游戏或由 App 控制。比如游戏保留自己的自适应扳机和灯光，App 只负责跟随游戏声音震动 | **Use it while gaming**: vibration, triggers and lights can each be left to the game or controlled by the app — e.g. keep the game's adaptive triggers and lights while the app adds vibration that follows the game's audio |
 | **灯条**：低/中/高频混合成红/绿/蓝，亮度跟随低音节奏，暗下去之后才换色 | **Light bar**: low/mid/high frequencies mixed into red/green/blue, brightness pulses with the bass, color changes only after it dims |
 | **白点电平灯**：下方 5 颗白灯显示左右声道的相对强度 | **Player LEDs**: the 5 white LEDs act as a stereo level meter |
+| **多手柄同时震动**：同时连多个手柄，各自独立设置（例如 DualSense 跟随音乐、8BitDo 同时按摩）；插拔时自动识别，记住每个手柄的设置 | **Multiple controllers at once**: connect several controllers, each with its own settings (e.g. DualSense follows the music while an 8BitDo runs a massage); hot-plug is detected and each controller's settings are remembered |
 | USB 和蓝牙都支持；显示手柄电量和充电状态；界面中英文切换 | Works over USB and Bluetooth; shows controller battery and charging state; Chinese / English UI |
 
 ## 支持的手柄 · Supported controllers
@@ -40,7 +41,6 @@ Works with most Sony controllers: DualSense / DualSense Edge get every feature, 
 | **DualSense（PS5）**、**DualSense Edge** | ✅ 全部功能：震动、扳机阻尼、灯条、白点电平灯，App 在后台也有效；USB / 蓝牙均可，**HD 震动仅 USB** · ✅ Everything: vibration, trigger resistance, light bar, player LEDs — also while the app is in the background; USB or Bluetooth, **HD haptics over USB only** |
 | 以索尼 DualSense 身份被系统识别的兼容手柄 · Third-party controllers that identify as a Sony DualSense | ✅ 与 DualSense 相同 · ✅ Same as DualSense |
 | **DualShock 4（PS4）** 及其他 macOS 能识别、支持震动的手柄 · **DualShock 4 (PS4)** and other controllers macOS recognizes with rumble | ⚠️ 基本功能：通过 GameController 震动；DualShock 4 的灯条在 App 位于前台时可变色；没有扳机阻尼和白点电平灯 · ⚠️ Basics: vibration via GameController; the DualShock 4 light bar changes color while the app is in the foreground; no trigger resistance or player LEDs |
-
 | **8BitDo Lite 2**（S 模式，即 Switch 模式） · **8BitDo Lite 2** (S / Switch mode) | ⚠️ 已实测：被识别为 Switch Pro 手柄，能震动（左右分开），力度偏弱（小转子马达）；没有灯条和扳机效果。其他模式下 macOS 无法让它震动 · ⚠️ Tested: recognized as a Switch Pro Controller; vibration works (left/right separately) but is weak (small rotating motors); no light bar or trigger effects. In its other modes macOS can't drive its rumble |
 
 > 已实测：DualSense（USB 和蓝牙）、8BitDo Lite 2（S 模式）。其他手柄按代码逻辑应可使用，但尚未逐一实测，欢迎反馈。
@@ -65,18 +65,23 @@ open build/ControllerMusicVisualizer.app
 
 `build.sh` compiles the app and packages it as `build/ControllerMusicVisualizer.app`. If an Apple Development certificate is available it is used for signing (so the audio permission survives rebuilds); otherwise the app is ad-hoc signed.
 
+单元测试（不需要手柄）：`swift test`。每次推送都会由 GitHub Actions 在 macOS 上自动编译并运行测试。· Unit tests (no controller needed): `swift test`. GitHub Actions builds and runs the tests on macOS for every push.
+
 ## 使用方法 · Usage
 
 1. **连接手柄** · **Connect the controller**
    - USB：插上数据线即可。· USB: just plug it in.
    - 蓝牙：首次配对时同时按住 **Create** 和 **PS** 键约 3–5 秒，灯条快速双闪后，在「系统设置 → 蓝牙」里连接。之后按一下 PS 键即可重连。· Bluetooth: for first-time pairing, hold **Create** + **PS** for 3–5 s until the light bar double-flashes, then connect in System Settings → Bluetooth. Afterwards, press PS to reconnect.
-2. **点「开始」**（或按空格键）。· **Press Start** (or the space bar).
-3. **首次使用「跟随音乐」**会请求「系统录音」权限，点「允许」。弹窗可能出现在另一块显示器上。如果错过了，可在「系统设置 → 隐私与安全性 → 录屏与系统录音」里打开。· **The first time you use Music mode**, macOS asks for *System Audio Recording* permission — click Allow. The dialog may appear on another display. If you missed it, enable the app in System Settings → Privacy & Security → Screen & System Audio Recording.
+2. **选择手柄**：连了多个手柄时，在左上角的下拉框里选择要设置的手柄，下方显示的就是它自己的设置；不想让 App 控制某个手柄，就取消它的「启用这个手柄」。· **Pick a controller**: with several controllers connected, choose one in the drop-down at the top left — the settings below belong to that controller. Uncheck *Enable this controller* to leave one alone.
+3. **点「开始」**（或按空格键），所有已启用的手柄一起开始。· **Press Start** (or the space bar) to start all enabled controllers.
+4. **首次使用「跟随音乐」**会请求「系统录音」权限，点「允许」。弹窗可能出现在另一块显示器上。如果错过了，可在「系统设置 → 隐私与安全性 → 录屏与系统录音」里打开。· **The first time you use Music mode**, macOS asks for *System Audio Recording* permission — click Allow. The dialog may appear on another display. If you missed it, enable the app in System Settings → Privacy & Security → Screen & System Audio Recording.
 
 ### 控制项说明 · Controls
 
 | 控制项 | 作用 | Control | What it does |
 |---|---|---|---|
+| 手柄下拉框 | 选择要设置的手柄（名称 · 连接方式 · 电量）；只有一个手柄时直接显示名称 | Controller menu | Chooses which controller you're editing (name · connection · battery); shows just the name when only one is connected |
+| 启用这个手柄 | 取消后 App 完全不碰这个手柄 | Enable this controller | Off = the app leaves this controller alone |
 | 强度 | 0–300%。超过 100% 会抬高弱震动，但强弱对比会变小 | Intensity | 0–300%. Above 100% lifts weak vibration but reduces contrast |
 | 响应速度 | 震动跟随声音的快慢（尤其是声音变小时） | Response | How quickly vibration follows the audio (especially when it gets quieter) |
 | 鼓点灵敏度 | 仅节拍模式：越高，越小的鼓点也会触发 | Beat sensitivity | Beat mode only: higher = softer hits also trigger |
@@ -88,6 +93,8 @@ open build/ControllerMusicVisualizer.app
 | App 控制灯光 | 取消后灯条和白灯交给游戏 | App controls lights | Off = light bar and player LEDs are left to the game |
 | └ 灯条速度 | 灯条暗下去的快慢：慢像呼吸灯，快则一闪一闪；也决定换色频率 | └ Light speed | How fast the light bar dims: slow = breathing, fast = flashing; also sets how often colors change |
 | └ 灯条起伏 | 亮暗变化幅度：100% 时鼓点间完全暗掉，越低保留的底亮度越高 | └ Light range | Depth of the pulsing: 100% = fully dark between beats, lower keeps a base glow |
+
+以上设置都是**每个手柄各自一份**，App 会按手柄记住；新手柄第一次连上时，复制当前选中手柄的设置。设置项会按手柄能力显示：没有灯条的手柄不显示灯光设置，非 DualSense 不显示扳机阻尼，只有 USB 连接的 DualSense 显示 HD 震动。· All of these are **per controller** and remembered per controller; a controller connecting for the first time copies the settings of the one currently selected. Options follow each controller's capabilities: no light bar → no light settings, non-DualSense → no trigger resistance, HD haptics only for a USB-connected DualSense.
 
 **建议 · Tips**：想要「跟得紧、强弱明显」，选低音或包络模式，响应速度 90–100%，强度 100% 左右。· For tight, punchy vibration, use Bass or Envelope mode, Response at 90–100%, Intensity around 100%.
 
@@ -101,28 +108,37 @@ open build/ControllerMusicVisualizer.app
 ### 整体结构 · Architecture
 
 ```
-                                       MassagePreset ─┐        ┌── GameController (trigger input)
-                                                      ▼        ▼
-System audio ─► SystemAudioTap ─► MusicAnalyzer ─► HapticsController ─► DualSenseHID ─► triggers, lights, rumble
- (listen-only)                        │                        │
-                                      │                        │  amplitude, every 10 ms
-                                      ▼                        ▼
-                               HapticWaveform ────────────────► HDHapticOutput ─► USB audio ch 3/4 (HD haptics)
+System audio ─► SystemAudioTap ─► MusicAnalyzer ─► raw features (shared, one per app)
+ (listen-only)                          │              │
+                                        │              ▼  every 10 ms (AppModel)
+                                        │              ┌─ ControllerSession A (DualSense) ─ VibrationShaper / LightShaper / MassagePreset
+                                        │              │     ├─► DualSenseHID ─► rumble, triggers, lights (HID reports)
+                                        ▼              │     └─► HDHapticOutput ─► USB audio ch 3/4 (HD haptics)
+                                 HapticWaveform ───────│─────────┘ (HD reads the shared waveform)
+                                                       └─ ControllerSession B (e.g. 8BitDo)
+                                                             └─► RumbleHapticOutput ─► GameController / CoreHaptics
+
+ControllerRegistry: discovers controllers (HID + GameController), hot-plug, identity, remembered settings
 ```
 
-图中箭头：系统声音经采集和分析后，一路去主控制（`HapticsController`）计算强度、灯光，经 HID 报告发给手柄；另一路把音乐低频波形写进 `HapticWaveform`，由 `HDHapticOutput` 以 HD 方式输出到 USB 音频第 3/4 声道。按摩波形和扳机按压也汇入主控制。
+系统声音只采集、分析一份，得到的原始特征交给每个手柄的会话（`ControllerSession`）：会话按自己的设置做平滑、鼓点判定、灯条换色，再通过各自的输出通道发给手柄。DualSense 走 HID 报告（USB 时震动走 HD 音频声道，读取共享的音乐低频波形）；其他手柄走 GameController。`AppModel` 每 10ms 驱动一次所有会话，`ControllerRegistry` 负责发现手柄、处理插拔、识别身份和记住设置。多手柄的完整设计见 [docs/multi-controller-design.md](docs/multi-controller-design.md)。
 
-Arrows: system audio is captured and analyzed; one path goes to `HapticsController`, which computes intensity and lighting and sends HID reports; the other writes the music's low-frequency waveform into `HapticWaveform`, which `HDHapticOutput` plays to USB audio channels 3/4 as HD haptics. Massage patterns and trigger input also feed the controller.
+System audio is captured and analyzed once; the raw features go to every controller's session (`ControllerSession`), which applies its own smoothing, beat detection and light-bar color logic and drives its own outputs. A DualSense uses HID reports (over USB, vibration goes through the HD audio channels and reads the shared low-frequency music waveform); other controllers use GameController. `AppModel` ticks all sessions every 10 ms, and `ControllerRegistry` discovers controllers, handles hot-plug, identifies them and remembers their settings. The full multi-controller design is in [docs/multi-controller-design.md](docs/multi-controller-design.md).
 
 | 文件 · File | 职责 · Responsibility |
 |---|---|
 | `SystemAudioTap.swift` | 用 Core Audio process tap 旁听整机声音（`muteBehavior = unmuted`，不影响播放）· Listens to all system audio via a Core Audio process tap (unmuted; playback is untouched) |
-| `MusicAnalyzer.swift` | 滤波、相对强度、鼓点检测，输出震动强度和灯光特征 · Filtering, relative loudness, beat detection; outputs vibration and light features |
+| `MusicAnalyzer.swift` | 滤波、相对强度、灯光特征，只输出原始特征（所有手柄共用）· Filtering, relative loudness, light features; outputs raw features shared by all controllers |
 | `MassagePatterns.swift` | 按摩波形、颜色、HD 频率范围，随机轮播 · Massage waveforms, colors, HD frequency ranges, random rotation |
-| `DualSenseHID.swift` | 直接发送 HID 输出报告（USB 0x02 / 蓝牙 0x31 + CRC32）· Sends raw HID output reports (USB 0x02 / Bluetooth 0x31 + CRC32) |
+| `DualSenseHID.swift` | 枚举 DualSense、发送 HID 输出报告（USB 0x02 / 蓝牙 0x31 + CRC32）、读取输入报告 · Enumerates DualSense controllers, sends raw HID output reports (USB 0x02 / Bluetooth 0x31 + CRC32), reads input reports |
 | `HDHaptics.swift` | HD 震动：音乐低频波形缓冲 + 向 USB 音频第 3/4 声道输出波形 · HD haptics: music low-frequency waveform buffer + waveform output to USB audio channels 3/4 |
 | `HapticEngines.swift` | 后备方案：GameController + CoreHaptics · Fallback path: GameController + CoreHaptics |
-| `HapticsController.swift` | 主循环、引擎选择、灯光映射 · Main loop, engine selection, light mapping |
+| `AppModel.swift` | 全局开始 / 停止、10ms 主循环、系统声音采集的启停 · Global start/stop, 10 ms main loop, starting/stopping audio capture |
+| `ControllerRegistry.swift` / `ControllerIdentity.swift` | 发现手柄、插拔、身份识别（DualSense 用 HID LocationID / 序列号，并与音频设备 UID 对应）· Controller discovery, hot-plug, identity (DualSense by HID LocationID / serial, matched to its audio device UID) |
+| `ControllerSession.swift` | 单个手柄：输出通道、扳机、震动、灯光、按摩时间 · One controller: outputs, triggers, vibration, lights, massage clock |
+| `ControllerSettings.swift` | 每个手柄的设置，按身份保存到 UserDefaults · Per-controller settings, saved to UserDefaults by identity |
+| `Shaping.swift` | 每个会话独立的震动平滑 / 鼓点判定、灯条锁色、白灯电平 · Per-session vibration smoothing / beat detection, light-bar color latching, player-LED meter |
+| `DualSenseReport.swift` | HID 输出报告的构造与输入报告（扳机、电量）的解析，纯函数便于测试 · Builds HID output reports and parses input reports (triggers, battery); pure functions for testing |
 | `App.swift` / `Localization.swift` | SwiftUI 界面、中英文切换 · SwiftUI UI and Chinese/English switching |
 
 ### 为什么直接发 HID 报告 · Why raw HID reports
@@ -176,4 +192,5 @@ We also tried coloring by spectral centroid, by the most prominent band, and by 
 ## 其他 · Misc
 
 - `dualsense_test.swift`：最早用来测试手柄按键、震动、灯条、自适应扳机的命令行小工具（`swiftc -swift-version 5 dualsense_test.swift -o dualsense_test && ./dualsense_test`）。· A small CLI tool from early development that tests buttons, rumble, light bar and adaptive triggers.
-- 调试：`open build/ControllerMusicVisualizer.app --args --autostart` 启动后自动开始。· Debugging: `--autostart` starts output on launch.
+- 调试参数：`open build/ControllerMusicVisualizer.app --args --autostart`（启动后自动开始）、`--massage`（新手柄默认按摩页）、`--select <序号>`（打开时选中第几个手柄，从 0 开始）。· Debug flags: `--autostart` (start on launch), `--massage` (new controllers open on the Massage tab), `--select <n>` (select the n-th controller on launch, 0-based).
+- 设计文档：[docs/multi-controller-design.md](docs/multi-controller-design.md)（多手柄）。· Design doc: [docs/multi-controller-design.md](docs/multi-controller-design.md) (multiple controllers).
