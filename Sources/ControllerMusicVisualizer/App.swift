@@ -241,9 +241,36 @@ struct SessionPanel: View {
                     .padding(.leading, 20)
                 }
             }
+            if session.hasSpeaker {
+                Toggle(L("手柄扬声器同步播放（仅 USB）", "Play on controller speaker too (USB only)"),
+                       isOn: $session.settings.speakerEnabled)
+                if session.settings.speakerEnabled {
+                    VStack(alignment: .leading, spacing: 4) {
+                        slider(L("扬声器音量", "Speaker volume"), value: $session.settings.speakerVolume)
+                        if let latency = session.latency {
+                            Text(latencyText(latency)).font(.caption).foregroundStyle(.secondary)
+                        }
+                        if let stats = session.audioStats {
+                            Text(stats).font(.caption2.monospaced()).foregroundStyle(.tertiary)
+                        }
+                    }
+                    .padding(.leading, 20)
+                }
+            }
             Text(L("取消勾选的项交给游戏控制，方便边玩游戏边用。", "Unchecked items are left to the game, so you can use this while gaming."))
                 .font(.caption).foregroundStyle(.secondary)
         }
+    }
+
+    /// 延迟分解的一行小字：手柄比 Mac 音响晚多少，以及各段（采集 + 缓冲余量 + 手柄输出）
+    private func latencyText(_ b: LatencyBreakdown) -> String {
+        let parts = String(format: "%.0f + %.0f + %.0f ms", b.tapCaptureMs, b.marginMs, b.controllerOutputMs)
+        if let extra = b.extraMs {
+            return L("手柄比 Mac 音响约晚 \(Int(extra.rounded())) ms（采集 + 缓冲 + 手柄输出 = \(parts)）",
+                     "Controller is ~\(Int(extra.rounded())) ms behind the Mac speakers (capture + buffer + output = \(parts))")
+        }
+        return L("手柄扬声器延迟约 \(Int(b.controllerTotalMs.rounded())) ms（\(parts)）",
+                 "Controller speaker delay ~\(Int(b.controllerTotalMs.rounded())) ms (\(parts))")
     }
 
     /// 只显示当前选中手柄的电平（D6）

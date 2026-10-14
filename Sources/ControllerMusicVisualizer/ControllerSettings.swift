@@ -31,6 +31,10 @@ struct ControllerSettings: Codable, Equatable {
     var lightSpeed: Float = 0.3
     /// 灯条亮暗变化幅度：1 = 鼓点间完全暗掉，越小保留的底亮度越高
     var lightRange: Float = 1
+    /// 手柄扬声器同步播放（仅 USB DualSense）：Mac 音响照常播放，手柄内置扬声器额外同步播放。默认关
+    var speakerEnabled = false
+    /// 扬声器音量 0...1（按分贝曲线映射），默认 30%，要轻
+    var speakerVolume: Float = SpeakerVolume.defaultVolume
 
     init() {}
 
@@ -38,6 +42,7 @@ struct ControllerSettings: Codable, Equatable {
         case enabled, source, musicMode, sensitivity, responsiveness, preset, speed, intensity
         case vibrationEnabled, hdEnabled, triggersEnabled, triggerResistance
         case lightEffects, lightSpeed, lightRange
+        case speakerEnabled, speakerVolume
     }
 
     /// 缺字段或字段无效时用默认值，保证旧版本保存的设置也能读出来
@@ -61,6 +66,8 @@ struct ControllerSettings: Codable, Equatable {
         lightEffects = value(.lightEffects, lightEffects)
         lightSpeed = value(.lightSpeed, lightSpeed)
         lightRange = value(.lightRange, lightRange)
+        speakerEnabled = value(.speakerEnabled, speakerEnabled)
+        speakerVolume = value(.speakerVolume, speakerVolume)
         self = sanitized
     }
 
@@ -73,13 +80,14 @@ struct ControllerSettings: Codable, Equatable {
         s.triggerResistance = unit(triggerResistance)
         s.lightSpeed = unit(lightSpeed)
         s.lightRange = unit(lightRange)
+        s.speakerVolume = unit(speakerVolume)
         s.intensity = intensity.isFinite ? min(max(intensity, 0), 3) : 1
         s.speed = speed.isFinite ? min(max(speed, 0.5), 2) : 1
         return s
     }
 
     /// 三项都交给游戏时 App 不碰手柄，等同于停止
-    var allLeftToGame: Bool { !vibrationEnabled && !triggersEnabled && !lightEffects }
+    var allLeftToGame: Bool { !vibrationEnabled && !triggersEnabled && !lightEffects && !speakerEnabled }
 
     /// 新手柄连上时的初始设置（D5）：有记忆用记忆；否则复制当前选中手柄的设置；都没有用默认值
     static func initial(remembered: ControllerSettings?, copying selected: ControllerSettings?) -> ControllerSettings {

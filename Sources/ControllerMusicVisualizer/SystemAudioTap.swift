@@ -15,7 +15,11 @@ final class SystemAudioTap {
     private var scratchR = [Float](repeating: 0, count: 8192)
     private var sampleRate: Float = 48000
 
-    func start() throws {
+    /// 聚合设备的 ID（读取输入缓冲 / 延迟数值用）；未启动时为 kAudioObjectUnknown
+    var deviceID: AudioObjectID { aggregateID }
+
+    /// ioFrames：把聚合设备的 IO 缓冲设小以降低采集延迟（夹在设备允许的范围内，设置失败就保持系统默认）
+    func start(ioFrames: Int? = nil) throws {
         // 排除自己（HD 引擎往手柄输出的声音不能被采回来）
         let exclude = CA.ownProcessObject().map { [$0] } ?? []
         let desc = CATapDescription(stereoGlobalTapButExcludeProcesses: exclude)
@@ -41,6 +45,8 @@ final class SystemAudioTap {
                                                kAudioSubTapUIDKey: desc.uuid.uuidString]],
         ]
         try check(AudioHardwareCreateAggregateDevice(config as CFDictionary, &aggregateID), "创建聚合设备")
+
+        if let ioFrames { CA.setBufferFrames(aggregateID, ioFrames) }
 
         try check(AudioDeviceCreateIOProcIDWithBlock(&procID, aggregateID, queue) { [weak self] _, input, _, _, _ in
             self?.handle(input)

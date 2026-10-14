@@ -131,7 +131,8 @@ System audio is captured and analyzed once; the raw features go to every control
 | `MusicAnalyzer.swift` | 滤波、相对强度、灯光特征，只输出原始特征（所有手柄共用）· Filtering, relative loudness, light features; outputs raw features shared by all controllers |
 | `MassagePatterns.swift` | 按摩波形、颜色、HD 频率范围，随机轮播 · Massage waveforms, colors, HD frequency ranges, random rotation |
 | `DualSenseHID.swift` | 枚举 DualSense、发送 HID 输出报告（USB 0x02 / 蓝牙 0x31 + CRC32）、读取输入报告 · Enumerates DualSense controllers, sends raw HID output reports (USB 0x02 / Bluetooth 0x31 + CRC32), reads input reports |
-| `HDHaptics.swift` | HD 震动：音乐低频波形缓冲 + 向 USB 音频第 3/4 声道输出波形 · HD haptics: music low-frequency waveform buffer + waveform output to USB audio channels 3/4 |
+| `HDHaptics.swift` | 音乐低频波形缓冲 + 手柄音频输出：第 3/4 声道 = HD 震动，第 1/2 声道 = 手柄扬声器（同一个 AUHAL、同一个读位置）· Music low-frequency waveform buffer + controller audio output: channels 3/4 = HD haptics, channels 1/2 = controller speaker (one AUHAL, one read cursor) |
+| `SpeakerDSP.swift` / `Latency.swift` | 扬声器的单声道高通缓冲、音量/限幅/渐变、读位置游标与自适应余量、延迟模型和可调参数 · Speaker mono high-pass feed, volume/limiter/fade, read cursor with adaptive margin, latency model and tuning parameters |
 | `HapticEngines.swift` | 后备方案：GameController + CoreHaptics · Fallback path: GameController + CoreHaptics |
 | `AppModel.swift` | 全局开始 / 停止、10ms 主循环、系统声音采集的启停 · Global start/stop, 10 ms main loop, starting/stopping audio capture |
 | `ControllerRegistry.swift` / `ControllerIdentity.swift` | 发现手柄、插拔、身份识别（DualSense 用 HID LocationID / 序列号，并与音频设备 UID 对应）· Controller discovery, hot-plug, identity (DualSense by HID LocationID / serial, matched to its audio device UID) |
@@ -193,4 +194,15 @@ We also tried coloring by spectral centroid, by the most prominent band, and by 
 
 - `dualsense_test.swift`：最早用来测试手柄按键、震动、灯条、自适应扳机的命令行小工具（`swiftc -swift-version 5 dualsense_test.swift -o dualsense_test && ./dualsense_test`）。· A small CLI tool from early development that tests buttons, rumble, light bar and adaptive triggers.
 - 调试参数：`open build/ControllerMusicVisualizer.app --args --autostart`（启动后自动开始）、`--massage`（新手柄默认按摩页）、`--select <序号>`（打开时选中第几个手柄，从 0 开始）。· Debug flags: `--autostart` (start on launch), `--massage` (new controllers open on the Massage tab), `--select <n>` (select the n-th controller on launch, 0-based).
-- 设计文档：[docs/multi-controller-design.md](docs/multi-controller-design.md)（多手柄）。· Design doc: [docs/multi-controller-design.md](docs/multi-controller-design.md) (multiple controllers).
+- 设计文档：[docs/multi-controller-design.md](docs/multi-controller-design.md)（多手柄）、[docs/controller-speaker-design.md](docs/controller-speaker-design.md)（手柄扬声器同步播放）。· Design docs: [multi-controller](docs/multi-controller-design.md), [controller speaker](docs/controller-speaker-design.md).
+- 手柄扬声器同步播放（仅 USB DualSense，默认关、音量 30%）的可调参数，用 `defaults write com.liuliu.ControllerMusicVisualizer <键> <值>` 修改，重启 App 生效；`defaults delete` 恢复默认。窗口里打开该功能后会显示估算延迟和缓冲状态。· Tuning for the controller speaker (USB DualSense only; off by default, 30% volume): set with `defaults write com.liuliu.ControllerMusicVisualizer <key> <value>` and restart; `defaults delete` restores defaults. The window shows the estimated delay and buffer stats while it is on.
+
+  | 键 · Key | 含义 · Meaning | 默认 · Default |
+  |---|---|---|
+  | `speaker.hwVolume` | 扬声器硬件音量 61–100（0x3d–0x64，低于范围等于静音）· hardware volume 61–100 | 100 |
+  | `speaker.preamp` | 扬声器前置放大 0–7 · speaker preamp 0–7 | 2 |
+  | `speaker.highpassHz` | 高通截止频率 · high-pass cutoff (Hz) | 200 |
+  | `speaker.bufferMs` | 环形缓冲目标余量（毫秒）；不设置 = 按块大小自动计算并自适应 · ring-buffer margin (ms); unset = automatic and adaptive | 自动 · auto |
+  | `speaker.ioFrames` | DualSense 输出的 IO 缓冲帧数 · DualSense output IO buffer frames | 128 |
+  | `speaker.tapFrames` | 系统声音采集的 IO 缓冲帧数 · system-audio tap IO buffer frames | 128 |
+  | `speaker.hapticsDelayMs` | 兼容震动相对扬声器的对齐延迟（毫秒，可为负：负值改为延迟扬声器）；不设置 = 按延迟模型估算 · alignment delay of compatible vibration vs. the speaker (ms; negative delays the speaker instead); unset = estimated | 自动 · auto |

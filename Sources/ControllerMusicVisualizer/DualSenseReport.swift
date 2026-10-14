@@ -1,5 +1,13 @@
 import Foundation
 
+/// 扬声器通路：on = 路径 3（耳机静音，扬声器 ← 右声道）+ 硬件音量 + 前置放大；
+/// off = 路径 0（扬声器静音，交出控制权时发一次）；untouched = 不设置（手柄保留现状）
+enum SpeakerState: Equatable {
+    case untouched
+    case on(volume: UInt8, preamp: UInt8)
+    case off
+}
+
 /// 一次输出报告要表达的状态（已经处理完「交给游戏」的默认值替换）
 struct DualSenseOutputState: Equatable {
     /// 是否设置震动 / 扳机 / 灯光（false = 交给游戏，对应的生效标志位不置）
@@ -10,11 +18,12 @@ struct DualSenseOutputState: Equatable {
     var resistance: UInt8 = 0
     var rgb: (UInt8, UInt8, UInt8) = (0, 64, 255)
     var playerLEDs: UInt8 = 0b00100
+    var speaker: SpeakerState = .untouched
 
     static func == (a: Self, b: Self) -> Bool {
         a.rumble == b.rumble && a.triggers == b.triggers && a.lights == b.lights && a.hd == b.hd
             && a.motorLeft == b.motorLeft && a.motorRight == b.motorRight && a.resistance == b.resistance
-            && a.rgb == b.rgb && a.playerLEDs == b.playerLEDs
+            && a.rgb == b.rgb && a.playerLEDs == b.playerLEDs && a.speaker == b.speaker
     }
 }
 
@@ -46,6 +55,20 @@ enum DualSenseReport {
         }
         c[43] = s.playerLEDs | 0x20          // bit5：立即亮灭，不渐变
         c[44] = s.rgb.0; c[45] = s.rgb.1; c[46] = s.rgb.2
+        // 扬声器字段：只用 |= 追加各自的生效标志位，不动 bit0/bit1（它们兼有震动模式切换作用）
+        switch s.speaker {
+        case .untouched:
+            break
+        case .on(let volume, let preamp):
+            c[0] |= 0x20 | 0x80        // 扬声器音量、音频输出路径生效
+            c[1] |= 0x80               // 前置放大生效
+            c[5] = volume              // speaker_volume（有效范围约 0x3d–0x64）
+            c[7] = 3 << 4              // audio_control bit4–5 = 3：耳机静音，扬声器 ← 右声道
+            c[37] = preamp & 0x07      // audio_control2 bit0–2：扬声器前置放大
+        case .off:
+            c[0] |= 0x80
+            c[7] = 0                   // 路径 0：扬声器静音
+        }
         return c
     }
 

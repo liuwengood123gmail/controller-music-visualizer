@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import CoreAudio
 import Foundation
 import GameController
 
@@ -15,6 +16,10 @@ final class AppModel: ObservableObject {
 
     private let analyzer = MusicAnalyzer()
     private let waveform = HapticWaveform()
+    private let tuning: SpeakerTuning
+    /// 手柄扬声器要播放的声音（单声道、已高通），所有手柄共享一份
+    private let speakerFeed: SpeakerFeed
+    private let timingBox: TimingBox
     private let registry: ControllerRegistry
     private var tap: SystemAudioTap?
     private var tapGeneration = 0
@@ -35,7 +40,18 @@ final class AppModel: ObservableObject {
 
     init() {
         GCController.shouldMonitorBackgroundEvents = true
-        registry = ControllerRegistry(store: SettingsStore(), waveform: waveform)
+        tuning = SpeakerTuning.load()
+        speakerFeed = SpeakerFeed(highpassHz: tuning.highpassHz)
+        let box = TimingBox()
+        timingBox = box
+        registry = ControllerRegistry(store: SettingsStore(), waveform: waveform, feed: speakerFeed, tuning: tuning,
+                                      tapTiming: { box.provider?() })
+        box.provider = { [weak self] in
+            MainActor.assumeIsolated { () -> DeviceTiming? in
+                guard let tap = self?.tap, tap.deviceID != kAudioObjectUnknown else { return nil }
+                return CA.timing(tap.deviceID, scope: kAudioObjectPropertyScopeInput)
+            }
+        }
         analyzer.waveform = waveform
 
         let args = CommandLine.arguments
@@ -78,7 +94,7 @@ final class AppModel: ObservableObject {
         let housekeeping = Timer(timeInterval: 5, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.registry.refresh()
-                self?.sessions.forEach { $0.refreshBattery() }
+                self?.sessions.forEach { $0.refreshBattery(); $0.refreshLatency() }
             }
         }
         RunLoop.main.add(housekeeping, forMode: .common)
@@ -188,7 +204,11 @@ final class AppModel: ObservableObject {
         tapStarting = true
         let generation = tapGeneration
         let t = SystemAudioTap()
-        t.onAudio = { [analyzer] l, r, n, sr in analyzer.process(left: l, right: r, frames: n, sampleRate: sr) }
+        t.onAudio = { [analyzer, speakerFeed] l, r, n, sr in
+            analyzer.process(left: l, right: r, frames: n, sampleRate: sr)
+            speakerFeed.write(left: l, right: r, frames: n, sampleRate: sr)   // 与分析器同一回调、同样的样本数
+        }
+        let tapFrames = tuning.tapFrames
         let pending = DispatchWorkItem { [weak self] in
             MainActor.assumeIsolated {
                 guard let self, self.tapGeneration == generation, self.tap == nil else { return }
@@ -200,7 +220,7 @@ final class AppModel: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8, execute: pending)
 
         DispatchQueue.global(qos: .userInitiated).async {
-            let result = Result { try t.start() }
+            let result = Result { try t.start(ioFrames: tapFrames) }
             DispatchQueue.main.async { [weak self] in
                 MainActor.assumeIsolated {
                     pending.cancel()
@@ -218,6 +238,7 @@ final class AppModel: ObservableObject {
                             en: "Cannot read system audio: \(failure). Allow this app in System Settings → Privacy & Security → Screen & System Audio Recording.")
                     } else {
                         self.tap = t
+                        self.sessions.forEach { $0.refreshLatency() }
                     }
                 }
             }
@@ -234,4 +255,9 @@ final class AppModel: ObservableObject {
         let music = analyzer.current   // 一份分析结果，所有手柄共用
         for s in sessions { s.tick(music: music, dt: dt, count: frame) }
     }
+}
+
+/// 让会话在不持有 AppModel 的情况下读到采集设备的延迟数值
+final class TimingBox {
+    var provider: (() -> DeviceTiming?)?
 }

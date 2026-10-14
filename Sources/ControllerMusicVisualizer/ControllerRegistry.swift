@@ -12,6 +12,9 @@ import GameController
 final class ControllerRegistry {
     private let store: SettingsStore
     private let waveform: HapticWaveform
+    private let feed: SpeakerFeed
+    private let tuning: SpeakerTuning
+    private let tapTiming: () -> DeviceTiming?
 
     private(set) var sessions: [ControllerSession] = []
 
@@ -22,9 +25,13 @@ final class ControllerRegistry {
     /// 列表变化：新增的、移除的会话
     var onChange: (_ added: [ControllerSession], _ removed: [ControllerSession]) -> Void = { _, _ in }
 
-    init(store: SettingsStore, waveform: HapticWaveform) {
+    init(store: SettingsStore, waveform: HapticWaveform, feed: SpeakerFeed, tuning: SpeakerTuning,
+         tapTiming: @escaping () -> DeviceTiming?) {
         self.store = store
         self.waveform = waveform
+        self.feed = feed
+        self.tuning = tuning
+        self.tapTiming = tapTiming
     }
 
     struct Found {
@@ -98,7 +105,8 @@ final class ControllerRegistry {
                                                       copying: selectedSettings())
             adjustNew(&settings)
             let s = ControllerSession(identity: f.identity, hid: f.hid, gc: f.gc,
-                                      settings: settings, waveform: waveform)
+                                      settings: settings, waveform: waveform, feed: feed,
+                                      tuning: tuning, tapTiming: tapTiming)
             added.append(s)
             result.append(s)
         }
