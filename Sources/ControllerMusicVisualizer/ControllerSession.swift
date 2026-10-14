@@ -24,6 +24,10 @@ final class ControllerSession: ObservableObject, Identifiable {
     /// 随机按摩当前轮播到的预设（界面显示用）
     @Published private(set) var randomNow: MassagePreset?
     @Published private(set) var errorMessage: Bilingual?
+    /// 手柄扬声器相对 Mac 音响的延迟分解（扬声器同步播放运行时才有）
+    @Published private(set) var latency: LatencyBreakdown?
+    /// 调试信息：IO 缓冲帧数、环形缓冲余量、欠载次数
+    @Published private(set) var audioStats: String?
 
     /// 全局「开始」是否按下
     private(set) var armed = false
@@ -33,19 +37,33 @@ final class ControllerSession: ObservableObject, Identifiable {
     private var input: DualSenseInput?
     private var output: HapticOutput?
     private var hid: DualSenseHID?
-    private var hd: HDHapticOutput?
+    private var audio: DualSenseAudioOutput?
+    private var hdActive = false
+    private let feed: SpeakerFeed
+    private let tuning: SpeakerTuning
+    /// 系统声音采集（tap 聚合设备）的延迟数值；采集还没起来时为 nil
+    private let tapTiming: () -> DeviceTiming?
+    private var controllerTiming = DeviceTiming()
+    // 震动与扬声器的对齐：较快的一路加一点延迟（见 LatencyModel）
+    private var align = DelayLine()
+    private var alignClock = 0.0
+    private var alignDelayMs = 0.0
     private var massageTime: Double = 0
     private var vibration = VibrationShaper()
     private var lightShaper = LightShaper()
     private var ledMeter = PlayerLEDMeter()
 
     init(identity: ControllerIdentity, hid: DualSenseInfo?, gc: GCController?,
-         settings: ControllerSettings, waveform: HapticWaveform) {
+         settings: ControllerSettings, waveform: HapticWaveform, feed: SpeakerFeed,
+         tuning: SpeakerTuning, tapTiming: @escaping () -> DeviceTiming?) {
         self.identity = identity
         self.hidInfo = hid
         self.gc = gc
         self.settings = settings
         self.waveform = waveform
+        self.feed = feed
+        self.tuning = tuning
+        self.tapTiming = tapTiming
         input = hid.map { DualSenseInput(device: $0.device) }
         refreshBattery()
     }
@@ -57,17 +75,21 @@ final class ControllerSession: ObservableObject, Identifiable {
     var hasAdaptiveTriggers: Bool { isDualSense }
     /// HD 震动只有 USB 的 DualSense 能用
     var hasHD: Bool { hidInfo.map { !$0.bluetooth } ?? false }
+    /// 手柄扬声器同步播放：同样只有 USB 的 DualSense 能用（蓝牙下声音走私有的压缩报告，不支持）
+    var hasSpeaker: Bool { hasHD }
     var canVibrate: Bool { hidInfo != nil || gc?.haptics != nil }
 
     // 实际生效的开关 = 用户勾选 且 手柄支持
     var effVibration: Bool { settings.vibrationEnabled && canVibrate }
     var effTriggers: Bool { settings.triggersEnabled }
     var effLights: Bool { settings.lightEffects && hasLight }
-    var allLeftToGame: Bool { !effVibration && !effTriggers && !effLights }
+    var effSpeaker: Bool { settings.speakerEnabled && hasSpeaker }
+    var allLeftToGame: Bool { !effVibration && !effTriggers && !effLights && !effSpeaker }
 
-    /// 需要系统声音：跟随音乐，且震动或灯光由 App 控制
+    /// 需要系统声音：扬声器同步播放（任何模式），或跟随音乐且震动或灯光由 App 控制
     var needsAudio: Bool {
-        armed && settings.enabled && !allLeftToGame && settings.source == .music && (effVibration || effLights)
+        armed && settings.enabled && !allLeftToGame
+            && (effSpeaker || (settings.source == .music && (effVibration || effLights)))
     }
 
     // MARK: - 显示
@@ -116,9 +138,10 @@ final class ControllerSession: ObservableObject, Identifiable {
                 if hid == nil && !new.triggersEnabled && hasAdaptiveTriggers { features.setTriggerResistance(0) }
             }
             if new.lightEffects != old.lightEffects { hid?.controlsLights = effLights }
+            if new.speakerVolume != old.speakerVolume { applySpeaker() }
         }
         let restart = new.source != old.source || new.vibrationEnabled != old.vibrationEnabled
-            || new.hdEnabled != old.hdEnabled
+            || new.hdEnabled != old.hdEnabled || new.speakerEnabled != old.speakerEnabled
         let startStop = new.enabled != old.enabled || new.allLeftToGame != old.allLeftToGame
         if restart || startStop { reconcile(restart: restart && new.enabled == old.enabled) }
     }
@@ -195,12 +218,21 @@ final class ControllerSession: ObservableObject, Identifiable {
             h.controlsRumble = effVibration
             h.controlsTriggers = effTriggers
             h.controlsLights = effLights
-            // USB 时启用 HD 震动：音频第 3/4 声道驱动马达，HID 关掉兼容震动开关
-            if effVibration, settings.hdEnabled, !info.bluetooth,
-               let dev = CA.dualSenseOutputDevice(locationID: info.locationID),
-               let out = try? HDHapticOutput(device: dev, waveform: waveform) {
-                hd = out
-                h.hdHaptics = true
+            // USB 时用手柄的音频设备：第 3/4 声道 = HD 震动（HID 关掉兼容震动开关），第 1/2 声道 = 扬声器
+            let wantHD = effVibration && settings.hdEnabled && !info.bluetooth
+            let wantSpeaker = effSpeaker
+            if wantHD || wantSpeaker {
+                if let dev = CA.dualSenseOutputDevice(locationID: info.locationID),
+                   let out = try? DualSenseAudioOutput(device: dev, waveform: waveform, feed: feed,
+                                                       haptics: wantHD, tuning: tuning) {
+                    audio = out
+                    controllerTiming = CA.timing(dev, scope: kAudioObjectPropertyScopeOutput)
+                    if wantHD { h.hdHaptics = true; hdActive = true }
+                    if wantSpeaker { applySpeaker() }
+                } else if wantSpeaker {
+                    errorMessage = Bilingual(zh: "无法打开手柄的音频设备，扬声器同步播放不可用。",
+                                             en: "Could not open the controller's audio device; speaker playback is unavailable.")
+                }
             }
         } else if effVibration, let gc {
             do {
@@ -218,16 +250,27 @@ final class ControllerSession: ObservableObject, Identifiable {
                 en: "Vibration is not supported in this mode. For 8BitDo, switch to S (Switch) mode and reconnect.")
         }
         engineName = !settings.vibrationEnabled ? Bilingual(zh: "震动交给游戏", en: "Vibration left to games")
-                   : hd != nil ? Bilingual(zh: "HD 震动（USB）", en: "HD haptics (USB)")
+                   : hdActive ? Bilingual(zh: "HD 震动（USB）", en: "HD haptics (USB)")
                    : output?.name ?? Bilingual(zh: "震动不可用", en: "Vibration unavailable")
+        if audio != nil && effSpeaker {
+            engineName = Bilingual(zh: engineName.zh + " + 手柄扬声器", en: engineName.en + " + speaker")
+        }
+        align.reset()
+        alignClock = 0
+        updateAlignment()
+        refreshLatency()
         NSLog("ControllerMusicVisualizer engine (%@): %@", identity.key, engineName.en)
         isActive = true
     }
 
     private func shutdown() {
         guard isActive else { return }
-        hd?.stop()   // 先停音频波形，再让 HID 恢复兼容震动
-        hd = nil
+        audio?.stop()   // 先停音频（扬声器淡出、停波形），再让 HID 恢复兼容震动、关掉扬声器通路
+        audio = nil
+        hdActive = false
+        latency = nil
+        audioStats = nil
+        alignDelayMs = 0
         output?.set(left: 0, right: 0)
         output?.stop()
         output = nil
@@ -289,19 +332,67 @@ final class ControllerSession: ObservableObject, Identifiable {
         l = min(max(l * settings.intensity, 0), 1)
         r = min(max(r * settings.intensity, 0), 1)
         if !effVibration { l = 0; r = 0 }
-        if let hd {
+        level = (l, r)
+
+        // 对齐：较快的一路加一点延迟（HD 的强度包络早于缓冲里的载波；兼容震动早于扬声器）
+        alignClock += Double(dt)
+        if count % 50 == 0 { updateAlignment() }
+        if alignDelayMs > 0 {
+            align.push(time: alignClock, l, r)
+            (l, r) = align.value(at: alignClock - alignDelayMs / 1000)
+        }
+        if let audio, hdActive {
             let range = settings.source == .music ? settings.musicMode.carrierRange
                                                    : settings.preset.carrierRange(massageTime)
-            hd.set(left: l, right: r, freq: hdFrequency(range, amplitude: max(l, r)),
+            audio.set(left: l, right: r, freq: hdFrequency(range, amplitude: max(l, r)),
                    useMusic: settings.source == .music)
             output?.set(left: 0, right: 0)   // HID 只负责扳机、灯光（并保持定期重发）
         } else {
             output?.set(left: l, right: r)   // 震动交给游戏时 HID 不设置马达强度，这里只为定期重发扳机、灯光
         }
-        level = (l, r)
 
         // 灯光用强度之前的原始数值，强度调低也照样跳；交给游戏时完全不碰
         if effLights { updateLight(level: lightLevel, meter: meterIn, color: music.color, dt: dt) }
+    }
+
+    // MARK: - 扬声器与对齐
+
+    /// 打开扬声器通路（路径 3 + 硬件音量）并设置软件音量。音量 0 时通路保持打开、软件增益为 0（静音，无需反复开关）
+    private func applySpeaker() {
+        guard effSpeaker, let hid, let audio else { return }
+        hid.setSpeaker(true, hwVolume: tuning.hwVolume, preamp: tuning.preamp)
+        audio.setSpeakerGain(SpeakerVolume.gain(settings.speakerVolume))
+    }
+
+    /// 重新计算震动相对扬声器 / 载波的对齐延迟（缓冲余量会自适应变化，所以定期更新）
+    private func updateAlignment() {
+        guard let audio, settings.source == .music else { alignDelayMs = 0; return }
+        let margin = audio.marginMs
+        if hdActive {
+            alignDelayMs = LatencyModel.hdEnvelopeDelayMs(marginMs: margin)
+        } else if effSpeaker {
+            alignDelayMs = max(tuning.hapticsDelayMs ?? LatencyModel.compatHapticDelayMs(
+                marginMs: margin, controllerOutputMs: controllerTiming.ms), 0)
+        } else {
+            alignDelayMs = 0
+        }
+    }
+
+    /// 估算手柄扬声器相对 Mac 音响的延迟，并刷新调试信息
+    func refreshLatency() {
+        guard let audio, effSpeaker else { return }
+        let tapT = tapTiming()
+        let defaultOut = CA.defaultOutputDevice()
+        let macT = defaultOut != kAudioObjectUnknown ? CA.timing(defaultOut, scope: kAudioObjectPropertyScopeOutput) : nil
+        let margin = audio.marginMs > 0 ? audio.marginMs
+            : LatencyModel.minMarginMs(chunkFrames: tapT?.bufferFrames ?? 512,
+                                       outBlockFrames: Double(audio.ioFrames), sampleRate: controllerTiming.sampleRate)
+        if let tapT {
+            let b = LatencyModel.breakdown(tapInput: tapT, marginMs: margin, controller: controllerTiming, macOutput: macT)
+            if b != latency { latency = b }
+        }
+        audioStats = String(format: "IO %d frames · margin %.1f ms · underruns %d · align %.0f ms",
+                            audio.ioFrames, margin, audio.underruns, alignDelayMs)
     }
 
     /// HD 载波频率随强度变化：震动弱时用高频（细腻），强时降到 50–65Hz（实测马达最有劲的区间）。

@@ -36,6 +36,19 @@ final class DualSenseHID: HapticOutput {
     }
     private var releaseRumble = false, releaseTriggers = false, releaseLights = false
 
+    /// 扬声器通路：打开后路径固定为 3（耳机静音，扬声器 ← 右声道）；关闭 / 停止时发一次路径 0 再放手
+    private var speakerOn = false
+    private var speakerVolume: UInt8 = 0x64, speakerPreamp: UInt8 = 0
+    private var releaseSpeaker = false
+
+    func setSpeaker(_ on: Bool, hwVolume: UInt8 = 0x64, preamp: UInt8 = 0) {
+        if on == speakerOn && (!on || (hwVolume == speakerVolume && preamp == speakerPreamp)) { return }
+        if !on && speakerOn { releaseSpeaker = true }
+        speakerOn = on
+        speakerVolume = hwVolume; speakerPreamp = preamp
+        handedOver()
+    }
+
     /// 控制权变化后立即发送（交出的项这一次会发默认值）
     private func handedOver() {
         dirty = true
@@ -125,6 +138,7 @@ final class DualSenseHID: HapticOutput {
         light = (0, 64, 255)   // 恢复默认蓝色
         hdHaptics = false      // 恢复兼容震动，不影响其他游戏和 App
         playerLEDs = 0b00100
+        if speakerOn { speakerOn = false; releaseSpeaker = true }   // 恢复扬声器通路为默认（静音）
         _ = send()
     }
 
@@ -158,7 +172,8 @@ final class DualSenseHID: HapticOutput {
         let rumble = controlsRumble || releaseRumble
         let triggers = controlsTriggers || releaseTriggers
         let lights = controlsLights || releaseLights
-        guard rumble || triggers || lights else { return true }   // 全部交给游戏
+        let speakerTouched = speakerOn || releaseSpeaker
+        guard rumble || triggers || lights || speakerTouched else { return true }   // 全部交给游戏
 
         // 交出去的项：这一次发送默认值
         var motors = (motorLeft, motorRight), resist = resistance, rgb = light, leds = playerLEDs
@@ -170,7 +185,10 @@ final class DualSenseHID: HapticOutput {
 
         let state = DualSenseOutputState(rumble: rumble, triggers: triggers, lights: lights, hd: hd,
                                          motorLeft: motors.0, motorRight: motors.1, resistance: resist,
-                                         rgb: rgb, playerLEDs: leds)
+                                         rgb: rgb, playerLEDs: leds,
+                                         speaker: speakerOn ? .on(volume: speakerVolume, preamp: speakerPreamp)
+                                                            : (releaseSpeaker ? .off : .untouched))
+        releaseSpeaker = false
         let report = DualSenseReport.make(state, bluetooth: bluetooth, seq: seq)
         let reportID: CFIndex = bluetooth ? 0x31 : 0x02
         if bluetooth { seq = (seq + 1) & 0x0F }
