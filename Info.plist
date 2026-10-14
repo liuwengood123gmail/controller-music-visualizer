@@ -6,6 +6,8 @@
 	<string>Controller Music Visualizer</string>
 	<key>CFBundleExecutable</key>
 	<string>ControllerMusicVisualizer</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.liuliu.ControllerMusicVisualizer</string>
 	<key>CFBundleName</key>
