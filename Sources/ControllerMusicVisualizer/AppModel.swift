@@ -49,7 +49,7 @@ final class AppModel: ObservableObject {
         }
 
         let nc = NotificationCenter.default
-        for name in [Notification.Name.GCControllerDidConnect, .GCControllerDidDisconnect] {
+        for name in [Notification.Name.GCControllerDidConnect, .GCControllerDidDisconnect, DualSenseHID.devicesChanged] {
             nc.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.registry.refresh() }
             }

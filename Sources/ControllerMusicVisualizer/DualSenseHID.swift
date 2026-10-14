@@ -82,10 +82,21 @@ final class DualSenseHID: HapticOutput {
         return byKey.values.sorted { $0.identity.key < $1.identity.key }
     }
 
+    /// DualSense 插入或拔出（HID 层）时发出，注册表收到后立即重新扫描
+    static let devicesChanged = Notification.Name("DualSenseHIDDevicesChanged")
+
+    /// 必须挂到主线程的事件循环上：否则管理器收不到插拔通知，设备列表停留在创建那一刻，
+    /// 运行中插入的手柄（包括蓝牙 → USB 切换）根本枚举不到，只能退回 GameController（后台扳机阻尼失效）
     private static let sharedManager: IOHIDManager? = {
         let manager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
         let matching = [0x0CE6, 0x0DF2].map { [kIOHIDVendorIDKey: 0x054C, kIOHIDProductIDKey: $0] }
         IOHIDManagerSetDeviceMatchingMultiple(manager, matching as CFArray)
+        let notify: IOHIDDeviceCallback = { _, _, _, _ in
+            NotificationCenter.default.post(name: DualSenseHID.devicesChanged, object: nil)
+        }
+        IOHIDManagerRegisterDeviceMatchingCallback(manager, notify, nil)
+        IOHIDManagerRegisterDeviceRemovalCallback(manager, notify, nil)
+        IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
         return IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeNone)) == kIOReturnSuccess ? manager : nil
     }()
 
