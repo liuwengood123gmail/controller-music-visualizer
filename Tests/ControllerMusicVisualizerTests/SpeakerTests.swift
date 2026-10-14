@@ -53,16 +53,69 @@ final class SpeakerDSPTests: XCTestCase {
         x.withUnsafeBufferPointer { p in
             feed.write(left: p.baseAddress!, right: p.baseAddress!, frames: 9600, sampleRate: sr)
         }
-        let peak = (4800..<9600).map { abs(feed.buffer[$0]) }.max()!
-        XCTAssertEqual(peak, 0.5, accuracy: 0.02)
+        // 左右相同 → 单声道不减半；之后经过音量归一化，输出接近目标电平。
+        // 电平估计「快升慢降」，更接近峰值，所以正弦（峰值比 RMS 高 3dB）的输出 RMS 约比目标低 3dB
+        let tail = (4800..<9600).map { feed.buffer[$0] }
+        let rms = sqrtf(tail.map { $0 * $0 }.reduce(0, +) / Float(tail.count))
+        XCTAssertEqual(20 * log10f(rms / SpeakerFeed.agcTargetRMS), -3, accuracy: 1.5)
+    }
+
+    // MARK: 自动拉平音量
+
+    func testQuietAudioIsBoostedButNotBeyondMax() {
+        let feed = SpeakerFeed()
+        let x = sine(1000, 48000, amp: 0.02)   // 很轻的声音（约 -37dBFS）
+        x.withUnsafeBufferPointer { p in
+            feed.write(left: p.baseAddress!, right: p.baseAddress!, frames: 48000, sampleRate: sr)
+        }
+        // 缓冲是环形的：读最近写入的 0.2 秒
+        let end = feed.written.pointee
+        let peak = ((end - 9600)..<end).map { abs(feed.buffer[$0 & SpeakerFeed.mask]) }.max()!
+        XCTAssertGreaterThan(peak, 0.02 * 4)                         // 明显被抬高
+        XCTAssertLessThanOrEqual(peak, 0.02 * SpeakerFeed.agcMaxBoost * 1.05)   // 不超过最大放大倍数
+    }
+
+    func testLoudAudioIsTurnedDown() {
+        let feed = SpeakerFeed()
+        let x = sine(1000, 48000, amp: 0.9)    // 很响（RMS 约 0.64）
+        x.withUnsafeBufferPointer { p in
+            feed.write(left: p.baseAddress!, right: p.baseAddress!, frames: 48000, sampleRate: sr)
+        }
+        XCTAssertLessThan(feed.agcGain, 0.5)
+        XCTAssertGreaterThanOrEqual(feed.agcGain, SpeakerFeed.agcMinGain - 0.01)
+    }
+
+    /// 播放器音量不同（这里差 20dB），送到手柄的电平应基本一致
+    func testPlayerVolumeDoesNotChangeOutputLevel() {
+        func outputRMS(amp: Float) -> Float {
+            let feed = SpeakerFeed()
+            let x = sine(1000, 96000, amp: amp)
+            x.withUnsafeBufferPointer { p in
+                feed.write(left: p.baseAddress!, right: p.baseAddress!, frames: 96000, sampleRate: sr)
+            }
+            let end = feed.written.pointee
+            let tail = ((end - 9600)..<end).map { feed.buffer[$0 & SpeakerFeed.mask] }
+            return sqrtf(tail.map { $0 * $0 }.reduce(0, +) / Float(tail.count))
+        }
+        let loud = outputRMS(amp: 0.3), quiet = outputRMS(amp: 0.03)
+        XCTAssertEqual(20 * log10f(loud / quiet), 0, accuracy: 2)   // 差距小于 2dB
+    }
+
+    func testSilenceIsNotBoosted() {
+        let feed = SpeakerFeed()
+        let x = [Float](repeating: 0.0005, count: 48000).enumerated().map { $0.element * sinf(Float($0.offset)) }   // 底噪
+        x.withUnsafeBufferPointer { p in
+            feed.write(left: p.baseAddress!, right: p.baseAddress!, frames: 48000, sampleRate: sr)
+        }
+        XCTAssertEqual(feed.agcGain, 1, accuracy: 0.01)
     }
 
     // MARK: 音量 / 限幅 / 渐变
 
     func testVolumeCurve() {
         XCTAssertEqual(SpeakerVolume.gain(0), 0)            // 0% = 完全静音
-        XCTAssertEqual(SpeakerVolume.gain(1), 1, accuracy: 1e-6)   // 100% = 0dB，不放大
-        XCTAssertEqual(SpeakerVolume.gain(0.3), powf(10, -21.0 / 20), accuracy: 1e-4)   // 默认 30% = -21dB
+        XCTAssertEqual(SpeakerVolume.gain(1), powf(10, 18.0 / 20), accuracy: 1e-4)   // 100% = +18dB（由软限幅兜住）
+        XCTAssertEqual(SpeakerVolume.gain(0.3), powf(10, -11.4 / 20), accuracy: 1e-4)   // 默认 30% ≈ -11.4dB
         var last: Float = 0
         for i in 1...100 {
             let g = SpeakerVolume.gain(Float(i) / 100)
@@ -250,7 +303,7 @@ final class SpeakerTuningTests: XCTestCase {
         let t = SpeakerTuning.load(from: d)
         XCTAssertEqual(t, SpeakerTuning())
         XCTAssertEqual(t.hwVolume, 0x64)
-        XCTAssertEqual(t.preamp, 0)
+        XCTAssertEqual(t.preamp, 2)
         XCTAssertEqual(t.highpassHz, 200)
         XCTAssertNil(t.bufferMs)
         XCTAssertNil(t.hapticsDelayMs)
@@ -262,14 +315,14 @@ final class SpeakerTuningTests: XCTestCase {
         d.set(99, forKey: "speaker.preamp")
         d.set(300, forKey: "speaker.highpassHz")
         d.set(12.5, forKey: "speaker.bufferMs")
-        d.set(128, forKey: "speaker.ioFrames")
+        d.set(512, forKey: "speaker.ioFrames")   // 与默认 128 不同，才能验证读取
         d.set(-8, forKey: "speaker.hapticsDelayMs")
         let t = SpeakerTuning.load(from: d)
         XCTAssertEqual(t.hwVolume, 0x3d)
         XCTAssertEqual(t.preamp, 7)
         XCTAssertEqual(t.highpassHz, 300)
         XCTAssertEqual(t.bufferMs, 12.5)
-        XCTAssertEqual(t.ioFrames, 128)
+        XCTAssertEqual(t.ioFrames, 512)
         XCTAssertEqual(t.hapticsDelayMs, -8)
     }
 

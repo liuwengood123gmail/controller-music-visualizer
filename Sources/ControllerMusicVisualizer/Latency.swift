@@ -69,14 +69,14 @@ struct SpeakerTuning: Equatable {
     /// 扬声器硬件音量，范围 0x3d–0x64（61–100）；实测低于有效范围等于静音
     var hwVolume: UInt8 = 0x64
     /// 扬声器前置放大 0–7
-    var preamp: UInt8 = 0
+    var preamp: UInt8 = 2   // +6dB，与 Linux 驱动一致
     var highpassHz: Float = 200
     /// 环形缓冲目标余量（毫秒）；nil = 按块大小自动计算并自适应
     var bufferMs: Double?
     /// DualSense 输出的 IO 缓冲帧数
-    var ioFrames = 256
+    var ioFrames = 128   // 本机实测 128 帧稳定、延迟约减半
     /// 系统声音采集（tap 聚合设备）的 IO 缓冲帧数
-    var tapFrames = 256
+    var tapFrames = 128
     /// 兼容震动相对扬声器的对齐延迟（毫秒，可正可负；负 = 反过来延迟扬声器）；nil = 按延迟模型估算
     var hapticsDelayMs: Double?
 

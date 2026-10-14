@@ -31,13 +31,15 @@ struct Biquad {
 }
 
 enum SpeakerVolume {
-    /// 滑块 0...1 → 线性增益：按分贝线性映射，0 = 完全静音，1 = 0dB，最低（接近 0 的非零值）= -rangeDb
-    static let rangeDb: Float = 30
+    /// 滑块 0...1 → 线性增益：按分贝线性映射，0 = 完全静音，接近 0 = minDb，1 = maxDb。
+    /// 手柄扬声器很小，原样播放太轻：100% 允许放大到 +18dB，超出部分由软限幅平滑压住（声音更「满」，不爆音）
+    static let minDb: Float = -24
+    static let maxDb: Float = 18
     static let defaultVolume: Float = 0.3
 
     static func gain(_ v: Float) -> Float {
         guard v > 0.001 else { return 0 }
-        return powf(10, -rangeDb * (1 - min(v, 1)) / 20)
+        return powf(10, (minDb + (maxDb - minDb) * min(v, 1)) / 20)
     }
 }
 
@@ -178,6 +180,15 @@ final class SpeakerFeed {
     private var filterRate: Float = 0
     private let highpassHz: Float
 
+    // 音量归一化：采集到的是播放器调过音量之后的声音，播放器音量一变，手柄就跟着变。
+    // 这里把电平归一到固定目标，手柄音量只由 App 里的滑块决定（和震动强度一样独立）
+    static let agcTargetRMS: Float = 0.2      // 约 -14dBFS
+    static let agcMaxBoost: Float = 30        // 最多 +29.5dB：播放器音量拉得很低也能补回来
+    static let agcMinGain: Float = 0.25       // 最多 -12dB：来源特别响时压下来
+    static let agcGateRMS: Float = 0.0005     // 低于约 -66dBFS 视为静音，不放大（避免把底噪放出来）
+    private var agcLevel: Float = 0           // 均方电平
+    private(set) var agcGain: Float = 1
+
     init(highpassHz: Float = 200) {
         self.highpassHz = highpassHz
         filter = Biquad.highpass(hz: highpassHz, sampleRate: 48000)
@@ -197,9 +208,20 @@ final class SpeakerFeed {
             filterRate = sr
         }
         sampleRate = sr
+        // 电平：起 5ms、落 1.5s；增益：需要降低时 10ms 跟上，需要升高时 0.5s 慢慢抬（避免忽大忽小）
+        let levelUp = 1 - expf(-1 / (0.005 * sr)), levelDown = 1 - expf(-1 / (1.5 * sr))
+        let gainDown = 1 - expf(-1 / (0.01 * sr)), gainUp = 1 - expf(-1 / (0.5 * sr))
         var pos = written.pointee
         for i in 0..<frames {
-            buffer[pos & Self.mask] = filter.process((left[i] + right[i]) * 0.5)
+            let y = filter.process((left[i] + right[i]) * 0.5)
+            let sq = y * y
+            agcLevel += (sq - agcLevel) * (sq > agcLevel ? levelUp : levelDown)
+            let rms = sqrtf(agcLevel)
+            if rms > Self.agcGateRMS {
+                let want = min(max(Self.agcTargetRMS / rms, Self.agcMinGain), Self.agcMaxBoost)
+                agcGain += (want - agcGain) * (want < agcGain ? gainDown : gainUp)
+            }
+            buffer[pos & Self.mask] = y * agcGain
             pos += 1
         }
         lastChunk.pointee = frames

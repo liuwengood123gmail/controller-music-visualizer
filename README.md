@@ -200,9 +200,9 @@ We also tried coloring by spectral centroid, by the most prominent band, and by 
   | 键 · Key | 含义 · Meaning | 默认 · Default |
   |---|---|---|
   | `speaker.hwVolume` | 扬声器硬件音量 61–100（0x3d–0x64，低于范围等于静音）· hardware volume 61–100 | 100 |
-  | `speaker.preamp` | 扬声器前置放大 0–7 · speaker preamp 0–7 | 0 |
+  | `speaker.preamp` | 扬声器前置放大 0–7 · speaker preamp 0–7 | 2 |
   | `speaker.highpassHz` | 高通截止频率 · high-pass cutoff (Hz) | 200 |
   | `speaker.bufferMs` | 环形缓冲目标余量（毫秒）；不设置 = 按块大小自动计算并自适应 · ring-buffer margin (ms); unset = automatic and adaptive | 自动 · auto |
-  | `speaker.ioFrames` | DualSense 输出的 IO 缓冲帧数 · DualSense output IO buffer frames | 256 |
-  | `speaker.tapFrames` | 系统声音采集的 IO 缓冲帧数 · system-audio tap IO buffer frames | 256 |
+  | `speaker.ioFrames` | DualSense 输出的 IO 缓冲帧数 · DualSense output IO buffer frames | 128 |
+  | `speaker.tapFrames` | 系统声音采集的 IO 缓冲帧数 · system-audio tap IO buffer frames | 128 |
   | `speaker.hapticsDelayMs` | 兼容震动相对扬声器的对齐延迟（毫秒，可为负：负值改为延迟扬声器）；不设置 = 按延迟模型估算 · alignment delay of compatible vibration vs. the speaker (ms; negative delays the speaker instead); unset = estimated | 自动 · auto |
