@@ -36,11 +36,12 @@ enum LatencyModel {
                          macOutputMs: macOutput?.ms)
     }
 
-    /// 环形缓冲的最小安全余量（毫秒）：写端按块到达，lag 在一个块的范围内起伏（平均值至少比最低点高 chunk/2），
-    /// 最低点还要够读完一个输出块，再留一点安全量。chunk、outBlock 都用源采样帧
+    /// 环形缓冲的最小安全余量（毫秒）：写端按块到达，读端采样到的 lag 会因为两边时钟漂移，
+    /// 每隔一段时间整块（chunk）跳变一次（模拟实测：只留半个块会反复欠载），
+    /// 所以要留够一个整块 + 读完一个输出块，再加一点安全量。chunk、outBlock 都用源采样帧
     static func minMarginMs(chunkFrames: Int, outBlockFrames: Double, sampleRate: Double, safetyMs: Double = 1.5) -> Double {
         guard sampleRate > 0 else { return 20 }
-        return (Double(chunkFrames) / 2 + outBlockFrames) / sampleRate * 1000 + safetyMs
+        return (Double(chunkFrames) + outBlockFrames) / sampleRate * 1000 + safetyMs
     }
 
     /// 兼容震动（HID 报告 / CoreHaptics，不经音频）相对扬声器的对齐延迟（毫秒）。

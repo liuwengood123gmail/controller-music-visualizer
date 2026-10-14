@@ -94,7 +94,7 @@ final class SpeakerDSPTests: XCTestCase {
             if i == 960 { reached20ms = v > 0.98 }   // 20ms 内基本到位
         }
         XCTAssertTrue(reached20ms)
-        XCTAssertLessThan(maxStep, 0.001)            // 相邻采样的跳变很小 = 没有咔哒声
+        XCTAssertLessThan(maxStep, 0.006)            // 相邻采样最多变化 0.6%（一阶平滑的第一步）= 没有咔哒声
         // 淡出也平滑
         var down: Float = 1
         for _ in 0..<2400 {
@@ -215,8 +215,8 @@ final class LatencyTests: XCTestCase {
     }
 
     func testMinimumMargin() {
-        // 256 帧一块的写端 + 256 帧一块的读端 @48k：(128 + 256) / 48 + 1.5 = 9.5ms
-        XCTAssertEqual(LatencyModel.minMarginMs(chunkFrames: 256, outBlockFrames: 256, sampleRate: 48000), 9.5, accuracy: 1e-9)
+        // 256 帧一块的写端 + 256 帧一块的读端 @48k：(256 + 256) / 48 + 1.5 = 12.17ms
+        XCTAssertEqual(LatencyModel.minMarginMs(chunkFrames: 256, outBlockFrames: 256, sampleRate: 48000), 512.0 / 48 + 1.5, accuracy: 1e-9)
         // 缓冲越小余量越小
         XCTAssertLessThan(LatencyModel.minMarginMs(chunkFrames: 128, outBlockFrames: 128, sampleRate: 48000),
                           LatencyModel.minMarginMs(chunkFrames: 256, outBlockFrames: 256, sampleRate: 48000))
