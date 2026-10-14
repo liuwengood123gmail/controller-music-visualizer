@@ -13,3 +13,9 @@ jobs:
         run: swift build -c release
       - name: Test
         run: swift test
+      - name: Typecheck research probes
+        run: |
+          for f in docs/research/*.swift; do
+            echo "== $f"
+            swiftc -swift-version 5 -typecheck -import-objc-header docs/research/opus-shim.h "$f"
+          done
