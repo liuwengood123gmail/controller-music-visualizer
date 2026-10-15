@@ -31,6 +31,7 @@ Works with most Sony controllers: DualSense / DualSense Edge get every feature, 
 | **边玩游戏边用**：震动、扳机、灯光可以分别交给游戏或由 App 控制。比如游戏保留自己的自适应扳机和灯光，App 只负责跟随游戏声音震动 | **Use it while gaming**: vibration, triggers and lights can each be left to the game or controlled by the app — e.g. keep the game's adaptive triggers and lights while the app adds vibration that follows the game's audio |
 | **灯条**：低/中/高频混合成红/绿/蓝，亮度跟随低音节奏，暗下去之后才换色 | **Light bar**: low/mid/high frequencies mixed into red/green/blue, brightness pulses with the bass, color changes only after it dims |
 | **白点电平灯**：下方 5 颗白灯显示左右声道的相对强度 | **Player LEDs**: the 5 white LEDs act as a stereo level meter |
+| **屏蔽 PS 键打开系统「游戏」**：PS 键（系统主页键）不再弹出 macOS 的游戏浮层或聚焦搜索；首次开启时系统会弹窗请求授权，点「允许」即可 | **Block the PS button from opening Games**: the PS (Home) button no longer opens the macOS Game Overlay or Spotlight; macOS asks for permission the first time — click Allow |
 | **多手柄同时震动**：同时连多个手柄，各自独立设置（例如 DualSense 跟随音乐、8BitDo 同时按摩）；插拔时自动识别，记住每个手柄的设置 | **Multiple controllers at once**: connect several controllers, each with its own settings (e.g. DualSense follows the music while an 8BitDo runs a massage); hot-plug is detected and each controller's settings are remembered |
 | USB 和蓝牙都支持；显示手柄电量和充电状态；界面中英文切换 | Works over USB and Bluetooth; shows controller battery and charging state; Chinese / English UI |
 

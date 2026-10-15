@@ -14,6 +14,22 @@ final class AppModel: ObservableObject {
     @Published private(set) var errorMessage: Bilingual?
     @Published private(set) var notice: Bilingual?
 
+    /// 屏蔽 PS 键（系统「主页键」）打开 macOS「游戏」：让系统把主页键交给 App 处理。
+    /// Apple 的 preferredSystemGestureState，按文档通常只在 App 位于前台时生效
+    @Published var blockHomeButton = UserDefaults.standard.object(forKey: "blockHomeButton") as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(blockHomeButton, forKey: "blockHomeButton")
+            applyHomeButtonPolicy()
+        }
+    }
+
+    func applyHomeButtonPolicy() {
+        for c in GCController.controllers() {
+            c.physicalInputProfile.buttons[GCInputButtonHome]?.preferredSystemGestureState =
+                blockHomeButton ? .disabled : .enabled
+        }
+    }
+
     private let analyzer = MusicAnalyzer()
     private let waveform = HapticWaveform()
     private let tuning: SpeakerTuning
@@ -67,7 +83,10 @@ final class AppModel: ObservableObject {
         let nc = NotificationCenter.default
         for name in [Notification.Name.GCControllerDidConnect, .GCControllerDidDisconnect, DualSenseHID.devicesChanged] {
             nc.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.registry.refresh() }
+                MainActor.assumeIsolated {
+                    self?.registry.refresh()
+                    self?.applyHomeButtonPolicy()   // 新连上的手柄也要设置
+                }
             }
         }
         nc.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
@@ -83,6 +102,7 @@ final class AppModel: ObservableObject {
         }
         GCController.startWirelessControllerDiscovery {}
         registry.refresh()
+        applyHomeButtonPolicy()
 
         // 调试用：--select <序号> 打开时选中第几个手柄（从 0 开始）
         if let i = args.firstIndex(of: "--select"), i + 1 < args.count, let n = Int(args[i + 1]),

@@ -27,6 +27,8 @@ struct ContentView: View {
                 SessionPanel(session: session, running: model.running, language: language)
                     .id(session.id)
             }
+            Toggle(L("屏蔽 PS 键打开系统「游戏」", "Block the PS button from opening Games"), isOn: $model.blockHomeButton)
+                .font(.callout)
             if let notice = model.notice {
                 Label(notice.text, systemImage: "lock.shield").font(.callout).foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
