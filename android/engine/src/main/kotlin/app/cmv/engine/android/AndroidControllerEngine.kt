@@ -264,6 +264,14 @@ class AndroidControllerEngine(context: Context) : ControllerEngine {
                 }
             }
             "access" -> sessions.firstOrNull()?.let { requestDeviceAccess(it.id) }
+            // 震动强度对照（A 档）：json = {"amp":255,"ms":2000,"restartMs":0}；restartMs > 0 时按这个间隔反复重新开始（同 App 的做法）
+            "rumble" -> if (Build.VERSION.SDK_INT >= 31) {
+                val o = json?.let { Json.parseToJsonElement(it).jsonObject }
+                fun num(k: String, d: Int) = o?.get(k)?.toString()?.toIntOrNull() ?: d
+                val dev = sessions.firstOrNull()?.found?.inputDeviceId?.let { InputDevice.getDevice(it) }
+                if (dev != null) SystemOutput.rumbleTest(dev, num("amp", 255), num("ms", 2000), num("restartMs", 0))
+                else Log.w(TAG, "rumble test: no input device")
+            }
         }
         post { Log.i(TAG, "state: ${_state.value}") }
     }

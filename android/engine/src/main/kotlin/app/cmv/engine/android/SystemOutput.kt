@@ -101,6 +101,28 @@ class SystemOutput(private val device: InputDevice, var updateMs: Int) {
     }
 
     companion object {
+        /** 调试：两个马达同一强度震 ms 毫秒；restartMs > 0 时每隔 restartMs 重新开始一段（每段 3 个间隔，同 setMotors） */
+        @RequiresApi(31)
+        fun rumbleTest(device: InputDevice, amp: Int, ms: Int, restartMs: Int) = Thread {
+            val vm = device.vibratorManager
+            val ids = vm.vibratorIds
+            val a = amp.coerceIn(1, 255)
+            fun play(duration: Long) {
+                val e = VibrationEffect.createOneShot(duration, a)
+                val c = if (ids.size >= 2) CombinedVibration.startParallel().addVibrator(ids[0], e).addVibrator(ids[1], e).combine()
+                        else CombinedVibration.createParallel(e)
+                vm.vibrate(c)
+            }
+            android.util.Log.i("cv-engine", "rumble test: ids=${ids.toList()} amp=$a ms=$ms restartMs=$restartMs " +
+                "amplitudeControl=${ids.map { vm.getVibrator(it).hasAmplitudeControl() }}")
+            if (restartMs <= 0) { play(ms.toLong()); Thread.sleep(ms.toLong()) }
+            else {
+                val end = SystemClock.uptimeMillis() + ms
+                while (SystemClock.uptimeMillis() < end) { play(restartMs * 3L); Thread.sleep(restartMs.toLong()) }
+            }
+            vm.cancel()
+        }.start()
+
         fun battery(device: InputDevice): Battery? {
             if (Build.VERSION.SDK_INT < 31) return null
             val s = device.batteryState
