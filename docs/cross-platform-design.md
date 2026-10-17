@@ -1,6 +1,6 @@
 # Windows / Android 支持 · 调研与设计
 
-> 状态：**调研 + 设计**，尚未实现。目标：在现有 macOS 版的基础上支持 **Windows** 和 **Android 手机 / 平板**，**尽量复用现有代码**。
+> 状态：**调研 + 设计**；P0a / P1（macOS）已完成，Android 预览版（P0b / P2 / P3）见 §7.5。目标：在现有 macOS 版的基础上支持 **Windows** 和 **Android 手机 / 平板**，**尽量复用现有代码**。
 > **已确定（2026-10）**：① **界面与底层手柄连接分离**，两边按 §4.2 的「引擎接口」各自开发；② 顺序：**P0a 抽核心 + Swift 接口 → P1 macOS 按接口改造并回归 →（P0b Kotlin 接口 → P2 Android 界面）→ P3 Android 底层 → P4 Windows 界面 → P5 Windows 底层**（§8）。
 > 本文已并入 2026-10-16 的审核意见（P0 拆分、测试数、`UserDefaults` 遗漏、Windows 蓝牙证据、A 档震动策略、补丁冲突规则、P1 验收补充、代码量估算 §12）。
 > 先读 README「设计思路」、[multi-controller-design.md](multi-controller-design.md)、[controller-speaker-design.md](controller-speaker-design.md)、[research/bluetooth-audio-findings.md](research/bluetooth-audio-findings.md)。
@@ -453,6 +453,22 @@ android/
 - `AudioRecord` + `AudioPlaybackCaptureConfiguration`（`addMatchingUsage(USAGE_MEDIA / USAGE_GAME / USAGE_UNKNOWN)`），48kHz float 立体声。
 - 延迟模型：播放采集本身的延迟未知 [待实测]，`LatencyModel` 需要加一项「采集延迟」，由实测填入。
 - 界面提示：「只能采到允许录音的 App；如果某个 App 没有反应，它可能禁止了录音」。
+
+### 7.5 实现状态（P0b / P2 / P3 预览版，2026-10）
+
+代码在 `android/`，测试说明见 [android-testing.md](android-testing.md)。与上面设计不同 / 补充的地方：
+
+- **JNI 不用 swift-java**：Swift 端新增 `ControllerCAPI` 目标（`Sources/ControllerCAPI`，`@_cdecl` 导出 C 函数，复杂数据走 JSON），Android 端一个很薄的 C 层 `cv_jni.c` 转调。这层 C 接口以后 Windows（P/Invoke）也能直接用。C 接口在 Linux 上有单测，JNI 在 CI 的 x86_64 模拟器上有 instrumented 测试。
+- **AAudio 在 C 层**（不在 Swift 里）：实时回调直接调用 Swift 的 `ControllerAudioRenderer`；只接受 4 声道（第 1/2 扬声器、3/4 触觉），否则报告实际声道数、不输出（不能把触觉写进扬声器声道）。
+- **多了「USB 直连」一档**：任何 Android 版本，USB 连接时经 `UsbManager.claimInterface(force = true)` 接管 HID 接口，直接收发 DualSense 报告（扳机阻尼、精确灯光、白灯、HD 模式开关、扬声器通路、HID 输入的 L2/R2 与电量）。代价是直连期间系统收不到按键、停止后要重新插拔。所以 DualSense 的优先级是：Android 17 HID（不抢占）> USB 直连 > A 档系统 API。
+- **Android 17 的 HidManager 在 API 37.2**（`Build.VERSION.SDK_INT_FULL >= 3700002`），不是 37.0；`compileSdk = 37`、`compileSdkMinor = 2`。
+- **前台服务类型**用 `mediaPlayback | mediaProjection`（`connectedDevice` 需要额外的运行时前提权限）。
+- **A 档震动**：`VibrationEffect.createWaveform` 一段时长 = 3 个更新间隔，默认每 40ms 更新（`GlobalOptions.rumbleUpdateMs`，10–200ms），振幅不可控时退化为开 / 关。
+- **身份**：USB DualSense = `ds:usb:<序号>`（以 UsbManager 为准，直连时系统输入设备会消失）；蓝牙 DualSense = `ds:bt:<InputDevice 描述符>`；其他手柄 = `gp:<描述符>`。USB / 蓝牙之分靠内核设备名（USB 带厂商前缀 Sony），分不出时按数量推断。对账规则仍用 Swift 的 `SessionReconciler`。
+- **引擎接口**比 Swift 版多：`provideCaptureConsent`、`requestDeviceAccess`、`CaptureStatus.NeedsConsent / Starting`、`ControllerInfo.access`（授权提示）、`EngineEvent.NeedsPermission`。`GlobalOptions` 在 Android 上是 `rumbleUpdateMs`（macOS 是屏蔽 PS 键）。
+- **契约样例**：`contract/fixtures/`（设置默认值、旧版本存档、越界夹值、补丁、枚举取值、对账），Swift（经 C 接口）和 Kotlin 两边的测试读同一组文件。
+- **APK 约 30MB**：Swift 运行库 + ICU（`lib_FoundationICU.so` 42MB 未压缩）占大头；以后可以让核心只依赖 `FoundationEssentials` 去掉 ICU（§9 第 8 条）。
+- 还没做：蓝牙 HD / 扬声器（Android 17 发 0x32 / 0x36）、截图测试、播放采集延迟的实测值。
 
 ## 8. 分阶段计划
 
