@@ -76,4 +76,4 @@ cd controller-music-visualizer
 - 测试：`swift test`（不需要手柄）；CI 在 macOS、Linux（`ControllerCore`）和 Android（交叉编译 + 模拟器测试）上跑。· Tests: `swift test`; CI covers macOS, Linux and Android.
 - 调试参数（macOS）：`--autostart`、`--massage`、`--select <n>`、`--fake-engine [none|singleUSB|multi|captureDenied]`。· macOS debug flags.
 - 扬声器可调参数（macOS）：`defaults write com.liuliu.ControllerMusicVisualizer speaker.<键> <值>`，键有 `hwVolume`（默认 100）、`preamp`（2）、`highpassHz`（200）、`bufferMs`（自动）、`ioFrames`（128）、`tapFrames`（128）、`hapticsDelayMs`（自动）。· Speaker tuning keys.
-- 文档：[设计说明](docs/design-notes.md) · [Android](docs/android.md) · [多手柄](docs/multi-controller-design.md) · [手柄扬声器](docs/controller-speaker-design.md) · [跨平台设计](docs/cross-platform-design.md) · [蓝牙音频调研](docs/bluetooth-audio-research.md)
+- 文档：[设计说明](docs/design-notes.md) · [Android](docs/android.md) · [多手柄](docs/multi-controller-design.md) · [手柄扬声器](docs/controller-speaker-design.md) · [跨平台设计](docs/cross-platform-design.md) · [Windows 开发计划](docs/windows-plan.md) · [蓝牙音频调研](docs/bluetooth-audio-research.md)
