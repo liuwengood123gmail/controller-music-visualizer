@@ -72,9 +72,10 @@ class UsbDirectLink private constructor(
     /**
      * 占用手柄的 USB 音频输出接口，给 usb_audio.c 直接发等时传输用。
      * 原因：Android 的 UsbAlsaManager 把 DualSense 判成「没有输出」（hasOutput: false），系统音频里看不到它。
-     * 占用会断开内核 USB 音频驱动对这个接口的绑定（只影响这个接口，麦克风接口不动）。失败返回 null，reason 给出原因
+     * 占用会断开内核 USB 音频驱动对这个接口的绑定（只影响这个接口，麦克风接口不动）。失败返回 null，reason 给出原因。
+     * 不发 UAC1 的采样率 / 静音 / 音量请求：实测 DualSense 全部拒绝（-1），不设也正常出声（只有 48kHz 一档）
      */
-    fun openAudio(sampleRate: Int, reason: (String) -> Unit): UsbAudioPort? {
+    fun openAudio(reason: (String) -> Unit): UsbAudioPort? {
         if (!open) { reason("USB link closed"); return null }
         val all = (0 until device.interfaceCount).map { device.getInterface(it) }
         // 音频流接口（class 1 / subclass 2）里带等时 OUT 端点的那个备用设置
@@ -90,56 +91,11 @@ class UsbDirectLink private constructor(
             connection.releaseInterface(zero)
             reason("setInterface(${alt.id}, alt ${alt.alternateSetting}) failed"); return null
         }
-        // UAC1：设置端点采样率（只有 48kHz 一档的设备会忽略，失败也不要紧）
-        val rate = byteArrayOf(sampleRate.toByte(), (sampleRate shr 8).toByte(), (sampleRate shr 16).toByte())
-        val r = connection.controlTransfer(0x22, 0x01, 0x0100, ep.address, rate, 3, 100)
-        unmute()
         Log.i("cv-engine", "USB audio: interface ${alt.id} alt ${alt.alternateSetting}, endpoint ${ep.address}, " +
-            "maxPacket ${ep.maxPacketSize}, set rate -> $r")
+            "maxPacket ${ep.maxPacketSize}")
         return UsbAudioPort(connection.fileDescriptor, ep.address, ep.maxPacketSize) {
             runCatching { connection.setInterface(zero) }
             runCatching { connection.releaseInterface(zero) }
-        }
-    }
-
-    /**
-     * 输出通路上的 UAC1 功能单元：取消静音、音量 0dB（macOS 会自动设，Linux / Android 不一定）。
-     * 从原始描述符里找「来源是 USB 流输入端」的功能单元；设备不支持的控制会 STALL，忽略即可
-     */
-    private fun unmute() {
-        val d = connection.rawDescriptors ?: return
-        var i = 0
-        var acInterface = -1
-        var curInterface = -1
-        val streamingInputs = mutableSetOf<Int>()
-        val featureUnits = mutableListOf<Pair<Int, Int>>()   // (unitId, sourceId)
-        while (i + 2 <= d.size) {
-            val len = d[i].toInt() and 0xFF
-            if (len < 2 || i + len > d.size) break
-            val type = d[i + 1].toInt() and 0xFF
-            if (type == 0x04 && len >= 9) {   // 接口描述符
-                curInterface = d[i + 2].toInt() and 0xFF
-                if ((d[i + 5].toInt() and 0xFF) == 1 && (d[i + 6].toInt() and 0xFF) == 1) acInterface = curInterface
-            } else if (type == 0x24 && curInterface == acInterface && len >= 4) {   // 音频控制接口的类描述符
-                when (d[i + 2].toInt() and 0xFF) {
-                    0x02 -> if (len >= 6) {   // 输入端：wTerminalType 0x0101 = USB 流
-                        val tt = (d[i + 4].toInt() and 0xFF) or ((d[i + 5].toInt() and 0xFF) shl 8)
-                        if (tt == 0x0101) streamingInputs += d[i + 3].toInt() and 0xFF
-                    }
-                    0x06 -> if (len >= 5) featureUnits += (d[i + 3].toInt() and 0xFF) to (d[i + 4].toInt() and 0xFF)
-                }
-            }
-            i += len
-        }
-        if (acInterface < 0) return
-        for ((unit, source) in featureUnits) {
-            if (source !in streamingInputs) continue
-            val index = (unit shl 8) or acInterface
-            for (ch in 0..4) {
-                val m = connection.controlTransfer(0x21, 0x01, (0x01 shl 8) or ch, index, byteArrayOf(0), 1, 100)
-                val v = connection.controlTransfer(0x21, 0x01, (0x02 shl 8) or ch, index, byteArrayOf(0, 0), 2, 100)
-                Log.i("cv-engine", "USB audio: feature unit $unit ch $ch mute -> $m, volume 0dB -> $v")
-            }
         }
     }
 

@@ -87,7 +87,7 @@ class ControllerAudio private constructor(
         /** 在 USB 直连上直接输出（DualSense 只有 48kHz）。失败返回 null，reason 给出原因 */
         fun openUsb(core: Long, haptics: Boolean, link: UsbDirectLink, reason: (String) -> Unit): ControllerAudio? {
             val sr = 48000
-            val port = link.openAudio(sr, reason) ?: return null
+            val port = link.openAudio(reason) ?: return null
             val renderer = NativeCore.rendererCreate(core, sr.toFloat(), haptics, Double.NaN, Double.NaN)
             val info = IntArray(4)
             val stream = NativeCore.usbAudioOpen(renderer, port.fd, port.endpoint, port.maxPacket, sr, USB_URBS, USB_PACKETS, info)

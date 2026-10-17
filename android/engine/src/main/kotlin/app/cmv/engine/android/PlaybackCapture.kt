@@ -44,7 +44,11 @@ class PlaybackCapture(private val projection: MediaProjection, private val core:
         val buf = FloatArray(CHUNK * 2)
         while (running) {
             val n = r.read(buf, 0, buf.size, AudioRecord.READ_BLOCKING)
-            if (n < 0) { Log.w("cv-engine", "capture read error $n"); onError("read error $n"); break }
+            if (n < 0) {
+                // 停止时 AudioRecord.stop() 会让阻塞中的 read 返回错误，这不是采集失败
+                if (!running) break
+                Log.w("cv-engine", "capture read error $n"); onError("read error $n"); break
+            }
             if (n >= 2) NativeCore.coreProcess(core, buf, n / 2, SAMPLE_RATE.toFloat())
         }
     }
