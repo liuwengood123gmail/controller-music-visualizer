@@ -140,12 +140,12 @@ class AndroidControllerEngine(context: Context) : ControllerEngine {
     }
 
     /** 界面的「停止」：录屏授权保留 PROJECTION_KEEP_MINUTES 分钟，期间再开始不用重新同意 */
-    override fun stop() = post { stopEngine(release = false) }
+    override fun stop() = post { stopEngine(release = false, keepMinutes = PROJECTION_KEEP_MINUTES) }
 
     /** 通知栏的「停止 / 退出」：同时释放录屏授权、结束前台服务 */
-    internal fun stopAndRelease() = post { stopEngine(release = true) }
+    internal fun stopAndRelease() = post { stopEngine(release = true, keepMinutes = 0) }
 
-    private fun stopEngine(release: Boolean) {
+    private fun stopEngine(release: Boolean, keepMinutes: Long) {
         if (running) {
             running = false
             ticker?.cancel(false); ticker = null
@@ -162,7 +162,7 @@ class AndroidControllerEngine(context: Context) : ControllerEngine {
             EngineService.paused(app)
             projectionRelease?.cancel(false)
             projectionRelease = executor.schedule({ safely { if (!running) { releaseProjection(); publish() } } },
-                                                  PROJECTION_KEEP_MINUTES, TimeUnit.MINUTES)
+                                                  keepMinutes, TimeUnit.MINUTES)
         }
         publish()
     }
@@ -365,7 +365,8 @@ class AndroidControllerEngine(context: Context) : ControllerEngine {
         removed.forEach { it.retire() }
         sessions = result
         if (running) added.forEach { it.arm() }
-        if (sessions.isEmpty() && running) stop()
+        // 手柄全部断开：录屏授权只短暂保留（马上插回 / USB ↔ 蓝牙切换不用重新同意），之后状态栏的「屏幕共享中」就消失
+        if (sessions.isEmpty() && running) stopEngine(release = false, keepMinutes = PROJECTION_KEEP_AFTER_DISCONNECT_MINUTES)
         if (plan["changed"]!!.jsonPrimitive.boolean || added.isNotEmpty()) {
             removed.forEach { _events.tryEmit(EngineEvent.ControllerDisconnected(it.id)) }
             added.forEach { _events.tryEmit(EngineEvent.ControllerConnected(it.id)) }
@@ -440,6 +441,8 @@ class AndroidControllerEngine(context: Context) : ControllerEngine {
         const val TAG = "cv-engine"
         /** 停止后录屏授权保留多久（期间再开始不用重新同意；状态栏会一直显示共享图标） */
         const val PROJECTION_KEEP_MINUTES = 30L
+        /** 手柄全部断开导致的停止：授权只保留这么久 */
+        const val PROJECTION_KEEP_AFTER_DISCONNECT_MINUTES = 1L
         const val ACTION_USB_PERMISSION = "app.cmv.USB_PERMISSION"
 
         @Volatile private var instance: AndroidControllerEngine? = null
