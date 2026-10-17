@@ -46,6 +46,9 @@ jobs:
         with:
           distribution: temurin
           java-version: 21
+      - uses: gradle/actions/setup-gradle@v4   # 缓存 Gradle 依赖和构建缓存
+        with:
+          cache-read-only: false   # 默认只有 master 写缓存；Android 开发在分支上，分支也要写
       - name: Cache Swift toolchain
         id: swift-cache
         uses: actions/cache@v4
@@ -75,9 +78,6 @@ jobs:
           echo "SWIFT_SDKS_DIR=$(dirname $(dirname $(dirname $(dirname "$setup"))))" >> $GITHUB_ENV
       - name: Build Swift core for Android (arm64 + x86_64)
         run: SWIFT=/opt/swift/usr/bin/swift ABIS="arm64-v8a x86_64" android/scripts/build-swift-android.sh
-      - name: Kotlin unit tests (contract fixtures, fake engine)
-        working-directory: android
-        run: ./gradlew --no-daemon :engine-api:test :engine-fake:test
       - name: Build APK (arm64)
         working-directory: android
         env:
@@ -89,7 +89,7 @@ jobs:
             echo "$CV_KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/preview.p12"
             export CV_KEYSTORE="$RUNNER_TEMP/preview.p12"
           fi
-          ./gradlew --no-daemon :app:assembleRelease
+          ./gradlew :app:assembleRelease
           apksigner=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | tail -1)
           "$apksigner" verify --print-certs app/build/outputs/apk/release/app-release.apk | grep -m1 "SHA-256" || true
           mkdir -p ../dist && cp app/build/outputs/apk/release/app-release.apk ../dist/ControllerMusicVisualizer-android.apk
@@ -97,9 +97,23 @@ jobs:
         with:
           name: ControllerMusicVisualizer-android
           path: dist/ControllerMusicVisualizer-android.apk
+      - name: Publish android-preview pre-release
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/heads/claude/p2-p3-android'))
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git tag -f android-preview && git push -f origin android-preview
+          gh release view android-preview > /dev/null 2>&1 || \
+            gh release create android-preview --prerelease --title "Android 预览版 / Android preview" \
+              --notes "每次推送自动更新。下载 ControllerMusicVisualizer-android.apk 到手机安装（需允许安装未知来源的应用）。"
+          gh release upload android-preview dist/ControllerMusicVisualizer-android.apk --clobber
+          gh release edit android-preview --notes "提交 ${GITHUB_SHA::7}（${GITHUB_REF_NAME}）· 下载 ControllerMusicVisualizer-android.apk 到手机安装（需允许安装未知来源的应用）。"
+      - name: Kotlin unit tests (contract fixtures, fake engine)
+        working-directory: android
+        run: ./gradlew :engine-api:test :engine-fake:test
       - name: Build emulator test APKs (x86_64)
         working-directory: android
-        run: ./gradlew --no-daemon -Pcv.abis=arm64-v8a,x86_64 :app:assembleDebug :engine:assembleDebugAndroidTest
+        run: ./gradlew -Pcv.abis=arm64-v8a,x86_64 :app:assembleDebug :engine:assembleDebugAndroidTest
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -113,14 +127,3 @@ jobs:
           disable-animations: true
           working-directory: android
           script: bash scripts/emulator-smoke.sh
-      - name: Publish android-preview pre-release
-        if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/heads/claude/p2-p3-android'))
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          git tag -f android-preview && git push -f origin android-preview
-          gh release view android-preview > /dev/null 2>&1 || \
-            gh release create android-preview --prerelease --title "Android 预览版 / Android preview" \
-              --notes "每次推送自动更新。下载 ControllerMusicVisualizer-android.apk 到手机安装（需允许安装未知来源的应用）。"
-          gh release upload android-preview dist/ControllerMusicVisualizer-android.apk --clobber
-          gh release edit android-preview --notes "提交 ${GITHUB_SHA::7}（${GITHUB_REF_NAME}）· 下载 ControllerMusicVisualizer-android.apk 到手机安装（需允许安装未知来源的应用）。"
