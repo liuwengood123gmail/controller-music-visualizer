@@ -26,6 +26,7 @@ import app.cmv.engine.ControllerEngine
 import app.cmv.engine.SettingsPatch
 import app.cmv.engine.Source
 import app.cmv.engine.fake.FakeControllerEngine
+import app.cmv.engine.windows.WindowsControllerEngine
 import app.cmv.ui.ControllerApp
 import app.cmv.ui.L
 import app.cmv.ui.text
@@ -67,14 +68,15 @@ private class Options(args: Array<String>) {
 private val prefs: Preferences = Preferences.userRoot().node("app/cmv/desktop")
 private val engineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-/** Windows 真实引擎在 W5 / W6 加入（engine-windows），之前一直返回 null */
-private fun createRealEngine(): ControllerEngine? = null
+/** 原生库加载失败（例如没构建 native-win）时为 null，界面退回假引擎「没有手柄」 */
+private val realEngine: ControllerEngine? by lazy {
+    runCatching { WindowsControllerEngine() }
+        .onFailure { System.err.println("[cv-desktop] real engine unavailable: $it") }
+        .getOrNull()
+}
 
 private fun createEngine(choice: String): ControllerEngine {
-    if (choice == REAL) {
-        createRealEngine()?.let { return it }
-        return FakeControllerEngine(FakeControllerEngine.Scenario.NONE, engineScope)
-    }
+    if (choice == REAL) return realEngine ?: FakeControllerEngine(FakeControllerEngine.Scenario.NONE, engineScope)
     val scenario = FakeControllerEngine.Scenario.entries.firstOrNull { it.name == choice } ?: FakeControllerEngine.Scenario.MULTI
     return FakeControllerEngine(scenario, engineScope)
 }

@@ -8,3 +8,4 @@ dist/
 native-win/bin/
 native-win/obj/
 native-win/out/
+native-win/build/

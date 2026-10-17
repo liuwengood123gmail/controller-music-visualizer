@@ -17,9 +17,14 @@ java {
 dependencies {
     implementation(project(":ui"))
     implementation(project(":engine-fake"))
+    implementation(project(":engine-windows"))
     implementation(compose.desktop.currentOs)
     implementation("org.jetbrains.compose.material3:material3:1.9.0")
 }
+
+// 开发时从 native-win/out/x64 加载 cvwin.dll 等；打包后改从应用资源目录加载（W7）
+val nativeDir = rootDir.resolve("../native-win/out/x64").normalize()
+tasks.withType<JavaExec>().configureEach { systemProperty("cv.native.dir", nativeDir.absolutePath) }
 
 compose.desktop {
     application {

@@ -6,20 +6,7 @@ $ErrorActionPreference = "Stop"
 $repo = Resolve-Path "$PSScriptRoot\..\.."
 $out = Join-Path $repo "native-win\out\x64"
 
-# Import the MSVC x64 environment (Swift on Windows needs link.exe, dumpbin needs it too).
-if (-not (Get-Command link.exe -ErrorAction SilentlyContinue)) {
-    $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-    $vs = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-    if (-not $vs) { throw "Visual Studio C++ build tools not found" }
-    cmd /c "`"$vs\VC\Auxiliary\Build\vcvars64.bat`" >nul 2>&1 && set" | ForEach-Object {
-        if ($_ -match '^([^=]+)=(.*)$') { [Environment]::SetEnvironmentVariable($Matches[1], $Matches[2], "Process") }
-    }
-}
-# A shell opened before the Swift installer ran does not see its user-level variables.
-if (-not $env:SDKROOT) { $env:SDKROOT = [Environment]::GetEnvironmentVariable("SDKROOT", "User") }
-if (-not (Get-Command swift.exe -ErrorAction SilentlyContinue)) {
-    $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [Environment]::GetEnvironmentVariable("Path", "User") + ";" + $env:Path
-}
+. "$PSScriptRoot\env.ps1"
 
 Push-Location $repo
 try {

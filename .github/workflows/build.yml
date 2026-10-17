@@ -52,9 +52,12 @@ jobs:
       - name: Build ControllerCAPI.dll and collect runtime
         shell: pwsh
         run: native-win/scripts/build-swift.ps1
+      - name: Build cvwin.dll
+        shell: pwsh
+        run: native-win/scripts/build-native.ps1
       - uses: actions/upload-artifact@v4
         with:
-          name: ControllerCAPI-windows-x64
+          name: native-windows-x64
           path: native-win/out/x64
       - uses: actions/setup-java@v4
         with:
@@ -63,9 +66,15 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           cache-read-only: false
-      - name: Kotlin tests + desktop app (no Android SDK)
+      # JNI 冒烟测试时把 Swift 工具链从 PATH 里去掉：DLL 必须从 out/x64 同一目录加载（docs/windows-plan.md §5.3）
+      - name: Kotlin tests, JNI smoke test (Swift off PATH), desktop app
         working-directory: android
-        run: ./gradlew.bat -PdesktopOnly :engine-api:test :engine-fake:test :desktop:compileKotlin
+        shell: pwsh
+        run: |
+          $env:Path = ($env:Path -split ';' | Where-Object { $_ -notmatch 'Swift' }) -join ';'
+          ./gradlew.bat -PdesktopOnly :engine-api:test :engine-fake:test :engine-windows:test :desktop:compileKotlin
+          [xml]$x = Get-Content engine-windows/build/test-results/test/TEST-app.cmv.engine.windows.NativeCoreTest.xml
+          if ([int]$x.testsuite.skipped -gt 0) { throw "JNI smoke test was skipped" }
 
   # Android：Swift 核心交叉编译成 .so → Kotlin 单测（契约 / 假引擎）→ 打 APK → x86_64 模拟器上跑 JNI 测试和启动冒烟
   android:

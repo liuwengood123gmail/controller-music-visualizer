@@ -128,6 +128,7 @@ Swift 核心里的规则（每 tick 的计算、报告构造、对账、对齐�
 - `desktopMain`：没有采集授权（WASAPI 环回不需要），`CaptureStatus.NeedsConsent` 不会出现；`LanguageStore` 用 `java.util.prefs.Preferences`；`collectAsStateWithLifecycle` 换成 `collectAsState`（或用 JetBrains 的多平台 lifecycle 库）。
 - 做法：把 Android 专有调用收进几个 `expect` 函数（`CaptureConsentFlow`、`PermissionEvents`、`rememberStartWithPermissions`、`LanguageStore`），两边 `actual`。Desktop 版窗口宽度 ≥ 720dp 时自动是两栏布局（现有逻辑）。
 - **实际做法（W3）**：没用 `commonMain` + `expect/actual`。两个目标都是 JVM，共享代码放在 `ui/src/shared/kotlin`，同时加进 `androidMain` 和 `desktopMain` 的源码目录；平台部分是 `androidMain/…/Platform.kt` 和 `desktopMain/…/Platform.kt` 里签名相同的 `internal` 函数（`collectUiState`、`rememberLanguagePrefs`、`captureRunningHint`、`CaptureConsentFlow`、`PermissionEvents`、`rememberStartWithPermissions`）。好处：共享代码可以直接用 JVM 库（`engine-api` 是 JVM 模块、`String.format`、`java.util.Locale`），不用改界面代码。Compose Multiplatform 1.12.2（material3 1.9.0），Kotlin 2.3.21。
+- **依赖**：`androidMain` 照旧用 androidx + `compose-bom`（和改 KMP 之前一模一样），只有 `desktopMain` 用 JetBrains 的构件。原因：CMP 1.12 在 Android 上会带进 androidx compose 1.12.1，它要求 AGP 9.1，而本项目是 AGP 8.13.2（CI 的 `checkReleaseAarMetadata` 实际报过这个错）。
 
 ### 2.5 Desktop 应用（`desktop/`）
 
