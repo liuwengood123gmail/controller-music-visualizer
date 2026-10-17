@@ -269,7 +269,7 @@ class AndroidControllerEngine(context: Context) : ControllerEngine {
                 val o = json?.let { Json.parseToJsonElement(it).jsonObject }
                 fun num(k: String, d: Int) = o?.get(k)?.toString()?.toIntOrNull() ?: d
                 val dev = sessions.firstOrNull()?.found?.inputDeviceId?.let { InputDevice.getDevice(it) }
-                if (dev != null) SystemOutput.rumbleTest(dev, num("amp", 255), num("ms", 2000), num("restartMs", 0))
+                if (dev != null) SystemOutput.rumbleTest(dev, num("amp", 255), num("ms", 2000), num("restartMs", 0), num("waveform", 0) != 0)
                 else Log.w(TAG, "rumble test: no input device")
             }
         }
