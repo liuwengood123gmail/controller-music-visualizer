@@ -14,6 +14,7 @@ import android.view.InputDevice
 import androidx.annotation.RequiresApi
 import app.cmv.engine.Battery
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
 /**
  * A 档（Android 12+，任何系统识别的手柄）：系统的 VibratorManager（两个马达）和 LightsManager（RGB 灯条、玩家指示灯）。
@@ -65,7 +66,9 @@ class SystemOutput(private val device: InputDevice, var updateMs: Int) {
     private fun amp(v: Float): Int {
         val c = v.coerceIn(0f, 1f)
         if (!amplitudeControl) return if (c > 0.5f) 255 else 0
-        return if (c < 0.02f) 0 else (c * 255).roundToInt().coerceIn(1, 255)
+        if (c < 0.02f) return 0
+        // 系统震动比 Mac 直发报告弱（实测最大力度够，但跟随音乐时多在中低段）：中低段往上抬，0.3 → 0.55，最大不变
+        return (sqrt(c) * 255).roundToInt().coerceIn(1, 255)
     }
 
     /** 灯条颜色和玩家指示灯（白点电平：亮几颗）。最多每 50ms 更新一次，只在变化时 */
