@@ -73,14 +73,20 @@ import kotlin.math.roundToInt
 /**
  * 整个界面。engine 由 app 模块给出（真实引擎或假引擎），界面只认识 [ControllerEngine]。
  * debugMenu：app 模块往右上角菜单里加的调试项（例如切换假引擎剧本）
+ * initialSelection：用户还没选手柄时默认选第几个（桌面版命令行 --select）
  */
 @Composable
-fun ControllerApp(engine: ControllerEngine, debugMenu: (@Composable ColumnScope.(close: () -> Unit) -> Unit)? = null) {
+fun ControllerApp(
+    engine: ControllerEngine,
+    initialSelection: Int = 0,
+    debugMenu: (@Composable ColumnScope.(close: () -> Unit) -> Unit)? = null,
+) {
     val languagePrefs = rememberLanguagePrefs()
     var language by remember { mutableStateOf(languagePrefs.load()) }
     val state by engine.state.collectUiState()
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
-    val selected = state.controller(selectedId) ?: state.controllers.firstOrNull()
+    val selected = state.controller(selectedId) ?: state.controllers.getOrNull(initialSelection)
+        ?: state.controllers.firstOrNull()
     LaunchedEffect(selected?.id) { engine.focus(selected?.id) }
 
     CaptureConsentFlow(engine, state)

@@ -1,7 +1,9 @@
 name: build
 
 on:
+  # PR 分支的推送只走 pull_request，避免同一提交跑两遍；master / Android 预览分支的推送照常（发布 android-preview 要用）
   push:
+    branches: [master, 'claude/p2-p3-android*']
   pull_request:
 
 jobs:
@@ -54,6 +56,16 @@ jobs:
         with:
           name: ControllerCAPI-windows-x64
           path: native-win/out/x64
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
+      - name: Kotlin tests + desktop app (no Android SDK)
+        working-directory: android
+        run: ./gradlew.bat -PdesktopOnly :engine-api:test :engine-fake:test :desktop:compileKotlin
 
   # Android：Swift 核心交叉编译成 .so → Kotlin 单测（契约 / 假引擎）→ 打 APK → x86_64 模拟器上跑 JNI 测试和启动冒烟
   android:
