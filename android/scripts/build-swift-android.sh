@@ -16,7 +16,7 @@ READELF=$(ls "$ANDROID_NDK_HOME"/toolchains/llvm/prebuilt/*/bin/llvm-readelf | h
 
 # Swift 运行库所在目录：SDK 包里的 swift-resources/usr/lib/swift-<arch>/android
 SDK_LIB=$(find ${SWIFT_SDKS_DIR:-} "$HOME/.swiftpm" "$HOME/.config/swiftpm" "$HOME/.local/share/swiftpm" \
-          -path "*android*swift-resources/usr/lib" -type d 2>/dev/null | head -1)
+          -path "*android*swift-resources/usr/lib" -type d 2>/dev/null | head -1 || true)
 [[ -d "$SDK_LIB" ]] || { echo "找不到 Swift SDK for Android（swift sdk install …）"; exit 1; }
 
 for ABI in $ABIS; do
