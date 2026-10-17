@@ -33,6 +33,11 @@ public struct LatencyBreakdown: Equatable, Codable, Sendable {
     public var controllerTotalMs: Double { tapCaptureMs + marginMs + controllerOutputMs }
     /// 手柄比 Mac 音响晚多少（读不到 Mac 输出时为 nil）
     public var extraMs: Double? { macOutputMs.map { controllerTotalMs - $0 } }
+
+    public init(tapCaptureMs: Double, marginMs: Double, controllerOutputMs: Double, macOutputMs: Double?) {
+        self.tapCaptureMs = tapCaptureMs; self.marginMs = marginMs
+        self.controllerOutputMs = controllerOutputMs; self.macOutputMs = macOutputMs
+    }
 }
 
 public enum LatencyModel {

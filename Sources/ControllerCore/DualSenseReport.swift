@@ -109,6 +109,8 @@ public struct DualSenseInputState: Equatable {
     /// 电量 0–100 和是否在充电
     public var batteryLevel = 0
     public var charging = false
+
+    public init() {}
 }
 
 extension DualSenseReport {

@@ -12,7 +12,11 @@ public struct VibrationShaper {
     private var bassSmooth: (Float, Float) = (0, 0)
     private var fullSmooth: (Float, Float) = (0, 0)
 
-    public mutating func reset() { self = VibrationShaper(sensitivity: sensitivity, responsiveness: responsiveness) }
+    public mutating func reset() {
+        var fresh = VibrationShaper()
+        fresh.sensitivity = sensitivity; fresh.responsiveness = responsiveness
+        self = fresh
+    }
 
     /// 按响应速度在「柔和」和「灵敏」两端之间取时间常数（对数插值）
     private func tau(soft: Float, fast: Float) -> Float {
@@ -53,6 +57,8 @@ public struct VibrationShaper {
         case .envelope: return fullSmooth
         }
     }
+
+    public init() {}
 }
 
 /// 每个手柄自己的灯条整形：亮度按「灯条速度」平滑；颜色只在「暗 → 亮」的瞬间按当时的三频段混合选定，亮着时保持
@@ -68,7 +74,11 @@ public struct LightShaper {
     private static let darkThreshold: Float = 0.12   // 低于它算暗了
     private static let litThreshold: Float = 0.25    // 高于它算重新亮起（两个门槛防止在边缘来回换色）
 
-    public mutating func reset() { self = LightShaper(lightSpeed: lightSpeed) }
+    public mutating func reset() {
+        var fresh = LightShaper()
+        fresh.lightSpeed = lightSpeed
+        self = fresh
+    }
 
     /// 灯条用：按「灯条速度」在 慢（起 20ms、落 300ms）和 快（起 3ms、落 60ms）之间取值
     private func followBar(_ current: Float, _ target: Float, dt: Float) -> Float {
@@ -104,6 +114,8 @@ public struct LightShaper {
         falling = brightness < previous
         return (brightness, (latched.0, latched.1, latched.2))
     }
+
+    public init() {}
 }
 
 /// 下方 5 颗白灯做成从中间向两边跳的立体声电平灯，跟随整体音量近似实时；
@@ -123,6 +135,8 @@ public struct PlayerLEDMeter {
         if hold.1 > 0.8 { mask |= 0b10000 }
         return mask
     }
+
+    public init() {}
 }
 
 /// HSV → RGB，h/s/v 都是 0...1

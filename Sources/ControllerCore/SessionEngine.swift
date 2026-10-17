@@ -58,6 +58,8 @@ public struct SessionCommands {
     public var level: (left: Float, right: Float) = (0, 0)
     /// 随机按摩当前轮播到的预设
     public var randomNow: MassagePreset?
+
+    public init() {}
 }
 
 /// 一个手柄会话每 10ms 的计算（与平台无关）：扳机调强度、跟随音乐 / 按摩的震动、

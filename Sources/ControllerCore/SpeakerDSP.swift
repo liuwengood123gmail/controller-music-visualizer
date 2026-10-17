@@ -59,6 +59,8 @@ public struct GainRamp {
         return value
     }
     public static func coefficient(sampleRate: Float, tau: Float = 0.004) -> Float { 1 - expf(-1 / (tau * sampleRate)) }
+
+    public init() {}
 }
 
 /// 读位置游标：写端（采集线程）按块写入，读端（设备渲染线程）按自己的时钟读。
@@ -104,6 +106,8 @@ public struct RingCursor {
         readPos = max(written - target, 0)
         lagAvg = target
     }
+
+    public init() {}
 }
 
 /// 环形缓冲余量自适应：以 floor 为底，每发生一次欠载就多留 2ms（最多 20ms），
@@ -124,6 +128,8 @@ public struct AdaptiveMargin {
             }
         }
     }
+
+    public init() {}
 }
 
 /// 带时间戳的延迟线（线性插值）：给较快的一路震动加固定延迟，使它与扬声器对齐
@@ -161,6 +167,8 @@ public struct DelayLine {
         if let j = newer { return (lefts[j], rights[j]) }
         return (0, 0)
     }
+
+    public init() {}
 }
 
 /// 扬声器要播放的声音：单声道混合 → 200Hz 高通 → 环形缓冲（所有手柄共享一份，每个输出有自己的读位置）。

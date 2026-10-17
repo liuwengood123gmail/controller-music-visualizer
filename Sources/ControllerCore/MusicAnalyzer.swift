@@ -40,6 +40,13 @@ public struct MusicFrame: Sendable {
     public var meter: (Float, Float) = (0, 0)
     /// 灯条颜色（未锁定）：低频 → 红、中频 → 绿、高频 → 蓝，三路各自按能量混合，0...1
     public var color: (r: Float, g: Float, b: Float) = (0, 0, 0)
+
+    public init(bass: (Float, Float) = (0, 0), bassRelative: (Float, Float) = (0, 0),
+                fullRelative: (Float, Float) = (0, 0), light: (Float, Float) = (0, 0),
+                meter: (Float, Float) = (0, 0), color: (r: Float, g: Float, b: Float) = (0, 0, 0)) {
+        self.bass = bass; self.bassRelative = bassRelative; self.fullRelative = fullRelative
+        self.light = light; self.meter = meter; self.color = color
+    }
 }
 
 /// 相对强度：按分贝记住近 2 秒的最小、最大音量，把当前音量映射到两者之间（0...1）。
@@ -59,6 +66,8 @@ public struct RelativeLevel {
         guard rms >= 1e-4 else { return 0 }
         return min(max((db - lo) / max(hi - lo, 6), 0), 1)
     }
+
+    public init() {}
 }
 
 /// 把左右声道的音频变成震动和灯光的原始特征。只有一份，所有手柄共用（在音频线程运行）
@@ -198,4 +207,6 @@ public final class MusicAnalyzer {
             for j in 0..<3 { colorOut[j] = min((colorOut[j] - 0.7 * mn) * scale, 1) }
         }
     }
+
+    public init() {}
 }
