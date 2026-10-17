@@ -1,0 +1,11 @@
+{
+  "comment": "补丁只改给出的字段，合并后同样夹住越界值",
+  "settings": { "intensity": 1.4, "source": "按摩", "preset": "捶背", "speakerEnabled": true },
+  "patch": { "speakerVolume": 0.8, "musicMode": "低音", "speed": 0.1, "lightEffects": false },
+  "expected": {
+    "enabled": true, "source": "按摩", "musicMode": "低音", "sensitivity": 0.5, "responsiveness": 0.7,
+    "preset": "捶背", "speed": 0.5, "intensity": 1.4, "vibrationEnabled": true, "hdEnabled": true,
+    "triggersEnabled": true, "triggerResistance": 0.5, "lightEffects": false, "lightSpeed": 0.3, "lightRange": 1,
+    "speakerEnabled": true, "speakerVolume": 0.8
+  }
+}

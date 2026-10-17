@@ -1,0 +1,13 @@
+{
+  "comment": "旧版本存档：缺新字段（hdEnabled、speakerEnabled…）、有未知字段、枚举值无效 → 缺的和无效的用默认值，未知字段忽略",
+  "input": {
+    "enabled": false, "source": "按摩", "musicMode": "低音", "preset": "不存在的预设", "intensity": 2.5,
+    "vibrationEnabled": false, "lightEffects": false, "someFutureField": 42
+  },
+  "expected": {
+    "enabled": false, "source": "按摩", "musicMode": "低音", "sensitivity": 0.5, "responsiveness": 0.7,
+    "preset": "揉捏", "speed": 1, "intensity": 2.5, "vibrationEnabled": false, "hdEnabled": true,
+    "triggersEnabled": true, "triggerResistance": 0.5, "lightEffects": false, "lightSpeed": 0.3, "lightRange": 1,
+    "speakerEnabled": false, "speakerVolume": 0.3
+  }
+}

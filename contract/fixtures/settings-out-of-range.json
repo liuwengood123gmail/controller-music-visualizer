@@ -1,0 +1,13 @@
+{
+  "comment": "越界值夹回合法范围：0…1 的滑块、强度 0…3、速度 0.5…2；类型不对的字段用默认值",
+  "input": {
+    "sensitivity": -1, "responsiveness": 7, "speed": 10, "intensity": -3, "triggerResistance": 1.5,
+    "lightSpeed": -0.2, "lightRange": 2, "speakerVolume": 9, "hdEnabled": "yes", "preset": "随机", "musicMode": "包络"
+  },
+  "expected": {
+    "enabled": true, "source": "跟随音乐", "musicMode": "包络", "sensitivity": 0, "responsiveness": 1,
+    "preset": "随机", "speed": 2, "intensity": 0, "vibrationEnabled": true, "hdEnabled": true,
+    "triggersEnabled": true, "triggerResistance": 1, "lightEffects": true, "lightSpeed": 0, "lightRange": 1,
+    "speakerEnabled": false, "speakerVolume": 1
+  }
+}

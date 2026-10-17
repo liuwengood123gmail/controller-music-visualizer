@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Sony DualSense / DualSense Edge -->
+    <usb-device vendor-id="1356" product-id="3302" />
+    <usb-device vendor-id="1356" product-id="3570" />
+</resources>

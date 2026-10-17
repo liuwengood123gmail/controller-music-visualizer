@@ -1,0 +1,16 @@
+{
+  "comment": "会话对账：沿用身份相同的、唯一一台 DualSense 换连接方式时迁移、其余新建 / 移除；保持原顺序",
+  "cases": [
+    {
+      "existing": [{"kind": "dualSense", "key": "ds:a"}, {"kind": "gamepad", "key": "gc:8BitDo|pro|0"}],
+      "found": [{"kind": "gamepad", "key": "gc:8BitDo|pro|0"}, {"kind": "dualSense", "key": "ds:b"}],
+      "expected": {"slots": [{"type": "migrate", "session": 0, "found": 1}, {"type": "keep", "session": 1, "found": 0}],
+                   "removed": [], "changed": false}
+    },
+    {
+      "existing": [{"kind": "dualSense", "key": "ds:a"}],
+      "found": [{"kind": "gamepad", "key": "gc:x"}],
+      "expected": {"slots": [{"type": "add", "found": 0}], "removed": [0], "changed": true}
+    }
+  ]
+}

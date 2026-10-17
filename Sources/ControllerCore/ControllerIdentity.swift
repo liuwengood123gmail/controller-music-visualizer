@@ -6,6 +6,8 @@ public struct ControllerIdentity: Hashable {
     public let kind: Kind
     public let key: String
 
+    public init(kind: Kind, key: String) { self.kind = kind; self.key = key }
+
     /// DualSense：蓝牙优先用序列号（通常是 MAC 地址），否则用 HID 的 LocationID（USB 实测没有序列号）
     public static func dualSense(locationID: Int?, serial: String?) -> ControllerIdentity {
         if let serial, !serial.isEmpty { return ControllerIdentity(kind: .dualSense, key: "ds:sn:\(serial)") }
