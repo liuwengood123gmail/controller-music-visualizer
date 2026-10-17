@@ -1,6 +1,6 @@
 # Windows / Android 支持 · 调研与设计
 
-> 状态：**调研 + 设计**；P0a / P1（macOS）已完成，Android 预览版（P0b / P2 / P3）见 §7.5。目标：在现有 macOS 版的基础上支持 **Windows** 和 **Android 手机 / 平板**，**尽量复用现有代码**。
+> 状态：P0a / P1（macOS）、P0b / P2 / P3（Android 预览版）已完成并在真机上验证（§7.5、[android.md](android.md)）；P4 / P5（Windows）未开始。目标：在现有 macOS 版的基础上支持 **Windows** 和 **Android 手机 / 平板**，**尽量复用现有代码**。
 > **已确定（2026-10）**：① **界面与底层手柄连接分离**，两边按 §4.2 的「引擎接口」各自开发；② 顺序：**P0a 抽核心 + Swift 接口 → P1 macOS 按接口改造并回归 →（P0b Kotlin 接口 → P2 Android 界面）→ P3 Android 底层 → P4 Windows 界面 → P5 Windows 底层**（§8）。
 > 本文已并入 2026-10-16 的审核意见（P0 拆分、测试数、`UserDefaults` 遗漏、Windows 蓝牙证据、A 档震动策略、补丁冲突规则、P1 验收补充、代码量估算 §12）。
 > 先读 README「设计思路」、[multi-controller-design.md](multi-controller-design.md)、[controller-speaker-design.md](controller-speaker-design.md)、[research/bluetooth-audio-findings.md](research/bluetooth-audio-findings.md)。
@@ -456,7 +456,10 @@ android/
 
 ### 7.5 实现状态（P0b / P2 / P3 预览版，2026-10）
 
-代码在 `android/`，测试说明见 [android-testing.md](android-testing.md)。与上面设计不同 / 补充的地方：
+代码在 `android/`，安装、实测结论和调试见 [android.md](android.md)。与上面设计不同 / 补充的地方：
+
+- **实测推翻了 C 档的假设**：Android（联想 Android 15、红米 Android 14）的 `UsbAlsaManager` 把 DualSense 记为 `hasOutput: false`，AAudio 找不到手柄。改为在 USB 直连上自己占用音频流接口、发等时传输（`usb_audio.c`），HD 和扬声器都正常。所以 USB 的 HD / 扬声器需要 USB 直连授权。
+- **A 档震动**：与 macOS 相比偏弱，主因是灯光每秒约 20 次更新会拖弱震动（灯光已降到最多每 150ms）；「每次调用重新开始」实测不影响强度。兼容震动力度曲线取平方根。
 
 - **JNI 不用 swift-java**：Swift 端新增 `ControllerCAPI` 目标（`Sources/ControllerCAPI`，`@_cdecl` 导出 C 函数，复杂数据走 JSON），Android 端一个很薄的 C 层 `cv_jni.c` 转调。这层 C 接口以后 Windows（P/Invoke）也能直接用。C 接口在 Linux 上有单测，JNI 在 CI 的 x86_64 模拟器上有 instrumented 测试。
 - **AAudio 在 C 层**（不在 Swift 里）：实时回调直接调用 Swift 的 `ControllerAudioRenderer`；只接受 4 声道（第 1/2 扬声器、3/4 触觉），否则报告实际声道数、不输出（不能把触觉写进扬声器声道）。
@@ -485,8 +488,8 @@ android/
 
 ## 9. 需要实物验证的问题（按对设计的影响排序）
 
-1. **Android：`VibratorManager` 能否以 100Hz 更新强度而不卡顿 / 不累积延迟**（决定 A 档能否「跟随音乐」）。写一个只含一个按钮的测试 App 即可。
-2. **Android USB：AAudio 能否以 4 声道打开 DualSense，后两个声道是否直接震**（决定低版本 Android 有没有 HD；与第 1 条一起在 P3 开头做。手头有设备的话可以提前做，不影响界面开发）。
+1. ~~Android：`VibratorManager` 能否跟随音乐~~ **已实测**：每 40ms 更新可以跟随，不断续；强度受灯光更新频率影响（§7.5）。
+2. ~~Android USB：AAudio 能否以 4 声道打开 DualSense~~ **已实测：不能**（系统不把它当输出设备）；改用 USB 等时传输直接输出，可行（§7.5）。
 3. **Android 17：`HidDevice.sendOutputReport` 能否发 DualSense 的 0x02 / 0x31，速率多少**（决定 B 档；蓝牙下顺便测 0x32 / 0x36 的速率，对照 macOS 的 ~5 KB/s）。
 4. **Windows 蓝牙：`WriteFile` 发 0x31 / 0x32 / 0x36 的速率**（把 `docs/research/bt-send-rate-probe.swift` 移植成 Windows 版，几十行）。≥ 94 包/秒 × 398 字节 → 蓝牙扬声器可行。
 5. **Windows USB：DualSense 音频端点的混音格式**（`GetMixFormat` 是不是 4 声道），以及第 3/4 声道在共享模式下能否驱动触觉（社区资料说能）。
