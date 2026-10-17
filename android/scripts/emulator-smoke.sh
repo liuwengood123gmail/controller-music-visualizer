@@ -9,13 +9,15 @@ adb install -r -g app/build/outputs/apk/debug/app-debug.apk
 adb logcat -c
 adb shell am start -W -n app.cmv/.MainActivity
 sleep 8
-adb shell am start-foreground-service -n app.cmv/app.cmv.engine.android.EngineService --es cmd start || true
+svc() { adb shell am start-foreground-service -n app.cmv/app.cmv.engine.android.EngineService --es cmd "$1" 2>&1 | tee /dev/stderr | grep -q "^Error" && { echo "debug entry rejected"; exit 1; } || true; }
+svc start
 sleep 3
-adb shell am start-foreground-service -n app.cmv/app.cmv.engine.android.EngineService --es cmd stop || true
+svc stop
 sleep 2
 adb logcat -d -s cv-engine cv-native cv-app AndroidRuntime | tail -60
 if adb logcat -d | grep -E "FATAL EXCEPTION|UnsatisfiedLinkError|signal 11|Fatal signal" ; then
     echo "App crashed"; exit 1
 fi
 adb shell pidof app.cmv > /dev/null || { echo "App is not running"; exit 1; }
+adb logcat -d -s cv-engine | grep -q "debug command: start" || { echo "debug command did not reach the engine"; exit 1; }
 echo "Smoke test OK"

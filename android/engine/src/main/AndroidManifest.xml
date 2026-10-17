@@ -14,9 +14,11 @@
     <uses-feature android:name="android.hardware.usb.host" android:required="false" />
 
     <application>
+        <!-- exported 只为了 adb 调试入口；要求 DUMP 权限（adb shell 有，普通 App 没有），本 App 自己调用不受影响 -->
         <service
             android:name=".EngineService"
-            android:exported="false"
+            android:exported="true"
+            android:permission="android.permission.DUMP"
             android:foregroundServiceType="mediaPlayback|mediaProjection" />
     </application>
 </manifest>
