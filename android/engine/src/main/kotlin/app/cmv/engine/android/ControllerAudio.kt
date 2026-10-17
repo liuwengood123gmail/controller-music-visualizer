@@ -56,6 +56,10 @@ class ControllerAudio private constructor(
         fun open(context: Context, core: Long, haptics: Boolean, reason: (String) -> Unit): ControllerAudio? {
             val dev = findDevice(context) ?: run { reason("no USB audio device for the controller"); return null }
             val channels = dev.channelCounts.joinToString()
+            // 应用这一侧总能打开 4 声道（系统会混音到设备的实际声道数），所以先看设备自己报告的声道数
+            if (dev.channelCounts.isNotEmpty() && dev.channelCounts.max() < 4) {
+                reason("device reports channels [$channels], need 4"); return null
+            }
             val sr = dev.sampleRates.takeIf { it.isNotEmpty() }?.let { if (48000 in it) 48000 else it.max() } ?: 48000
             val renderer = NativeCore.rendererCreate(core, sr.toFloat(), haptics, Double.NaN, Double.NaN)
             val info = IntArray(4)
