@@ -15,7 +15,7 @@
 3. **Android 分三档**：
    - **A 档（Android 12+，任何手柄）**：系统的 `VibratorManager` / `LightsManager` → 双马达兼容震动 + 灯条颜色 + 玩家指示灯。没有扳机阻尼、HD、扬声器。
    - **B 档（Android 17+ / API 37）**：新的 `HidManager` / `HidDevice` 可以直接给 HID 设备发输出报告，需要用户授予 `ACCESS_HID`（危险级权限）并在系统选择器里选中设备 [已证实，文档]。DualSense 的扳机阻尼、灯条、白灯能**直接复用 `DualSenseReport`**；蓝牙 HD / 扬声器能否到达所需速率**待实测**。
-   - **C 档（USB 连接）**：经 AAudio 输出 4 声道 USB 音频做 HD 震动 + 扬声器——Android 的 USB 音频 4 声道支持**不确定**，需要实测。
+   - **C 档（USB 连接，不要求 Android 17）**：经 AAudio 输出 4 声道 USB 音频做 HD 震动 + 扬声器。**HD 很可能不需要任何 HID 权限**：Linux（与 Android 同一个内核驱动）上 USB 连接时，PipeWire 把手柄识别为 4.0 声道设备，后两个声道直接播普通音频就会震 [已证实，PipeWire issue #2486]。扬声器则需要先发 HID 报告打开通路——低版本 Android 用 `UsbDeviceConnection.claimInterface(force=true)`（API 12 起，「必要时断开内核驱动」）。Android 能否以 4 声道打开这个 USB 音频设备**需要实测**。
    - **系统声音采集**：`AudioPlaybackCapture`（Android 10+），需要用户每次同意屏幕录制、开前台服务；**只能采到允许被采集的 App**：用途为媒体 / 游戏 / 未知的音频，且该 App 没有退出采集 [已证实]。
 4. **最大的工作量不在新平台，而在第一步重构**：把核心抽成独立的 SwiftPM 目标、把平台相关的部分换成协议，**macOS 行为保持不变**。这一步做完，Windows 和 Android 只需各写一层「采集 / HID / 音频设备 / 界面」。
 5. 建议顺序：**P0 重构（macOS 回归）→ P1 Windows USB → P2 Windows 蓝牙 / 其他手柄 → P3 Android A 档 → P4 Android B / C 档**。每一阶段都有可单独交付的产品。
@@ -72,8 +72,8 @@
 | 灯条 / 白灯 | ✓ HID | ✓ HID | ✓ HID | A 档 ✓ `LightsManager`（RGB + 玩家指示灯）；B 档 ✓ HID | 同左 |
 | 扳机阻尼 | ✓ HID | ✓ HID | ✓ HID | **只有 B 档**（Android 17+） | **只有 B 档** |
 | L2/R2 调强度 | ✓ | ✓ HID 输入报告 | ✓ | ✓ `MotionEvent` 扳机轴 | ✓ |
-| HD 震动 | ✓ 4 声道音频 | ✓ 4 声道音频 [社区资料] | ◐ 0x32 触觉报告：有 Windows 实现，速率待测 | ? AAudio 4 声道（C 档） | ? B 档 + 0x32，速率待测 |
-| 手柄扬声器 | ✓ 4 声道音频 | ✓ 4 声道音频 | ? 0x36 Opus，速率待测 | ? C 档 | ? B 档 + 0x36 |
+| HD 震动 | ✓ 4 声道音频 | ✓ 4 声道音频 [社区资料] | ◐ 0x32 触觉报告：有 Windows 实现，速率待测 | ? AAudio 4 声道（C 档，**任何版本**，很可能不需要 HID） | ? 只有 B 档（17+）+ 0x32，速率待测 |
+| 手柄扬声器 | ✓ 4 声道音频 | ✓ 4 声道音频 | ? 0x36 Opus，速率待测 | ? C 档 + 打开通路的 HID 报告（B 档，或低版本抢占 USB 接口） | ? 只有 B 档 + 0x36 |
 | 其他手柄（8BitDo 等）震动 | ✓ GameController | ✓ SDL3 或 Windows.Gaming.Input | ✓ 同左 | ✓ A 档 `VibratorManager` | ✓ |
 | 后台运行 | ✓ | ✓ | ✓ | ◐ 前台服务（通知栏常驻） | ◐ 同左 |
 | 屏蔽 PS 键打开系统界面 | ✓（macOS「游戏」） | 不需要（Windows 没有对应行为；Steam 大屏幕模式可能会被唤起 [推测]） | 同左 | 不需要 | 不需要 |
@@ -126,7 +126,10 @@
 - **C 档：USB 音频（HD 震动 + 扬声器，USB 连接时）。**
   - Android 支持 USB 音频设备；AAudio 在超过 2 声道时使用**按声道序号的掩码**而不是位置掩码（AOSP 修复多声道 USB 播放的提交），请求的声道数超过设备支持时高位声道会被丢弃，打开后必须查询实际声道数 [已证实，[AOSP 提交](https://gitlab.e.foundation/e/os/android_frameworks_av/-/commit/16c66dd1e60d6b65b846f371c2ae4bf2b673545f)、[AAudio 文档](https://developer.android.com/ndk/reference/a_audio_8h)]。
   - 能否以 4 声道打开 DualSense 的 USB 音频、第 3/4 声道是否真能送到触觉：**未知**，必须实测。AAudio 是 C API，**Swift 可以直接调用**，渲染回调里跑现有的 `ControllerAudioRenderer`。
-  - HD 模式需要发 HID 报告清掉兼容震动位 → 依赖 B 档（Android 17）；更老的 Android 只能用 `UsbManager.claimInterface(force=true)` 抢占 HID 接口，代价是系统失去这个手柄的输入（游戏里不能用）[推测]。
+  - **HD 不需要 Android 17**：Linux 上 USB 连接时，手柄的后两个声道「直接播普通音频就会震」（PipeWire 甚至把这当成 bug 报告，讨论要不要隐藏这两个声道），说明内核驱动没有挡住音频触觉 [已证实，[PipeWire issue #2486](https://gitlab.freedesktop.org/pipewire/pipewire/-/issues/2486)]。Android 用的是同一个 `hid-playstation` 内核驱动，所以**只要 AAudio 能以 4 声道打开设备，HD 在 Android 10+（播放采集的最低版本）就可能工作，不需要任何 HID 权限** [推测，待实测]。
+  - 注意：macOS 上需要发 HID 报告清掉兼容震动位才进入 HD 模式（本项目实测）。Android 上内核驱动在发兼容震动时会置这些位 [推测]，所以 **HD 模式下不要同时用 A 档的 `VibratorManager`**，否则手柄可能被切回兼容模式。
+  - **扬声器**默认关闭，需要 HID 报告打开通路（路径 3）。Android 17+ 用 B 档；更低版本用 `UsbDeviceConnection.claimInterface(intf, force=true)`（API 12 起，文档原文 force =「必要时断开内核驱动」[已证实，[UsbDeviceConnection](https://developer.android.com/reference/android/hardware/usb/UsbDeviceConnection)]）只抢占 HID 接口、发一次 0x02 报告再放回；抢占期间系统收不到这个手柄的输入 [推测]。音频接口是独立的 USB 接口，不受影响 [推测]。
+  - **蓝牙下的 HD / 扬声器只能走 B 档**（需要原始 HID 报告 0x32 / 0x36）；Android 17 以前，普通 App 拿不到蓝牙手柄的原始 HID（hidraw 需要 root）[推测]。
 
 **其他。**
 - 电量：`InputDevice.getBatteryState()`（Android 12+）[待核实]。
@@ -333,7 +336,7 @@ SDL3 游戏手柄子系统：枚举、震动（`SDL_RumbleGamepad`）、灯（`S
 | **P1 Windows USB** | WASAPI 采集；Win32 HID（USB）；4 声道输出（HD + 扬声器）；C# 外壳；托盘 | 单个 USB DualSense：音乐三模式、按摩、HD、扳机、灯光、扬声器、L2/R2 都工作；两个 DualSense 时音频设备对应正确 | Windows PC + DualSense |
 | **P2 Windows 蓝牙 / 其他手柄** | 蓝牙 0x31；测蓝牙 0x32 / 0x36 速率，可行就做蓝牙 HD（及扬声器，需要 libopus）；SDL3 接其他手柄 | 蓝牙 DualSense 基础功能；8BitDo 震动；蓝牙 HD 视实测 | 同上 + 8BitDo |
 | **P3 Android A 档** | Kotlin 外壳 + 前台服务 + 播放采集；Swift 核心经 JNI；`VibratorManager` / `LightsManager` | Android 12+ 手机 / 平板上，DualSense（USB / 蓝牙）和 8BitDo 跟随音乐震动、灯条跟随 | Android 12+ 设备 + 手柄 |
-| **P4 Android B / C 档** | `HidManager` 路径；AAudio 4 声道探测与 HD / 扬声器 | Android 17 设备上扳机阻尼工作；USB 4 声道若可行则 HD / 扬声器工作 | Android 17 设备 |
+| **P4 Android C / B 档** | 先做 C 档：AAudio 4 声道探测与 USB HD（不需要 Android 17）、扬声器（低版本抢占 USB 接口打开通路）；再做 B 档 `HidManager` 路径 | 任一 Android 10+ 设备上 USB HD 工作（若 4 声道可行）；Android 17 设备上扳机阻尼、蓝牙 HD 视实测 | Android 10+ 设备 + USB-C 线；Android 17 设备 |
 
 ## 9. 需要实物验证的问题（按对设计的影响排序）
 
@@ -341,7 +344,7 @@ SDL3 游戏手柄子系统：枚举、震动（`SDL_RumbleGamepad`）、灯（`S
 2. **Android 17：`HidDevice.sendOutputReport` 能否发 DualSense 的 0x02 / 0x31，速率多少**（决定 B 档；蓝牙下顺便测 0x32 / 0x36 的速率，对照 macOS 的 ~5 KB/s）。
 3. **Windows 蓝牙：`WriteFile` 发 0x31 / 0x32 / 0x36 的速率**（把 `docs/research/bt-send-rate-probe.swift` 移植成 Windows 版，几十行）。≥ 94 包/秒 × 398 字节 → 蓝牙扬声器可行。
 4. **Windows USB：DualSense 音频端点的混音格式**（`GetMixFormat` 是不是 4 声道），以及第 3/4 声道在共享模式下能否驱动触觉（社区资料说能）。
-5. **Android USB：AAudio 能否以 4 声道打开 DualSense**（打开后查询实际声道数）。
+5. **Android USB：AAudio 能否以 4 声道打开 DualSense，后两个声道是否直接震**（打开后查询实际声道数；这一条决定 Android 低版本能不能有 HD，建议排在第 1 条之后马上做）。
 6. **Windows：HID 接口和音频端点的 ContainerId 是否一致**（决定两个 DualSense 时的精确对应）。
 7. **Android 播放采集的延迟**和哪些常用 App 禁止采集。
 8. **Swift 运行库体积**（Windows DLL、Android `.so`），看是否需要裁剪。
