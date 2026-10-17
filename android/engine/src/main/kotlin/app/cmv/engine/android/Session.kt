@@ -315,7 +315,8 @@ class Session(
             val res = out[NativeCore.T_RESISTANCE]
             if (!res.isNaN()) NativeCore.dsSetTriggerResistance(ds, res)
             if (hasLight) { NativeCore.dsSetLight(ds, r, g, b); if (leds != null) NativeCore.dsSetPlayerLeds(ds, leds) }
-            NativeCore.dsSetMotors(ds, out[NativeCore.T_MOTOR_L], out[NativeCore.T_MOTOR_R])   // 顺便负责定期重发
+            // 顺便负责定期重发；HD 运行时马达值是 0，曲线不影响
+            NativeCore.dsSetMotors(ds, SystemOutput.compatBoost(out[NativeCore.T_MOTOR_L]), SystemOutput.compatBoost(out[NativeCore.T_MOTOR_R]))
             flushReports()
         } else system?.let { s ->
             if (!hdActive && effVibration) s.setMotors(out[NativeCore.T_MOTOR_L], out[NativeCore.T_MOTOR_R])

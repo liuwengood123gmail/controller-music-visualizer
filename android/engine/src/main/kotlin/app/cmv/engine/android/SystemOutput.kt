@@ -67,8 +67,7 @@ class SystemOutput(private val device: InputDevice, var updateMs: Int) {
         val c = v.coerceIn(0f, 1f)
         if (!amplitudeControl) return if (c > 0.5f) 255 else 0
         if (c < 0.02f) return 0
-        // 系统震动比 Mac 直发报告弱（实测最大力度够，但跟随音乐时多在中低段）：中低段往上抬，0.3 → 0.55，最大不变
-        return (sqrt(c) * 255).roundToInt().coerceIn(1, 255)
+        return (compatBoost(c) * 255).roundToInt().coerceIn(1, 255)
     }
 
     /** 灯条颜色和玩家指示灯（白点电平：亮几颗）。最多每 50ms 更新一次，只在变化时 */
@@ -104,6 +103,12 @@ class SystemOutput(private val device: InputDevice, var updateMs: Int) {
     }
 
     companion object {
+        /**
+         * 兼容震动（非 HD）的力度曲线：中低段往上抬，0.3 → 0.55、0.5 → 0.71，最大不变。
+         * 实测 Android 上兼容震动最大力度够，但跟随音乐时数值多在中低段，体感比 Mac 弱。系统震动和 USB 直连的普通震动都用
+         */
+        fun compatBoost(v: Float): Float = sqrt(v.coerceIn(0f, 1f))
+
         /** 调试：两个马达同一强度震 ms 毫秒；restartMs > 0 时每隔 restartMs 重新开始一段（每段 3 个间隔，同 setMotors） */
         @RequiresApi(31)
         fun rumbleTest(device: InputDevice, amp: Int, ms: Int, restartMs: Int) = Thread {
