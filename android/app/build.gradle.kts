@@ -19,12 +19,23 @@ android {
         ndk { abiFilters += (findProperty("cv.abis") as String? ?: "arm64-v8a").split(",") }
     }
     buildFeatures { compose = true }
+    // 预览版固定签名：CI 从仓库 Secrets 解出密钥库（CV_KEYSTORE 指向文件），每次打包签名相同，可以直接覆盖安装。
+    // 没有提供（本地构建、外部 PR）时退回 debug 签名
+    val previewKeystore = System.getenv("CV_KEYSTORE")?.takeIf { it.isNotEmpty() && file(it).exists() }
+    signingConfigs {
+        if (previewKeystore != null) create("preview") {
+            storeFile = file(previewKeystore)
+            storeType = "pkcs12"
+            storePassword = System.getenv("CV_KEYSTORE_PASSWORD")
+            keyAlias = "preview"
+            keyPassword = System.getenv("CV_KEYSTORE_PASSWORD")
+        }
+    }
     buildTypes {
         release {
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            // 测试版：用 debug 签名，方便直接安装
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName(if (previewKeystore != null) "preview" else "debug")
         }
     }
     compileOptions {
