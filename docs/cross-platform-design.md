@@ -1,6 +1,6 @@
 # Windows / Android 支持 · 调研与设计
 
-> 状态：P0a / P1（macOS）、P0b / P2 / P3（Android 预览版）已完成并在真机上验证（§7.5、[android.md](android.md)）；P4 / P5（Windows）未开始。目标：在现有 macOS 版的基础上支持 **Windows** 和 **Android 手机 / 平板**，**尽量复用现有代码**。
+> 状态：P0a / P1（macOS）、P0b / P2 / P3（Android 预览版）已完成并在真机上验证（§7.5、[android.md](android.md)）；P4 / P5（Windows）未开始，界面定为 Compose Multiplatform，开发计划见 [windows-plan.md](windows-plan.md)。目标：在现有 macOS 版的基础上支持 **Windows** 和 **Android 手机 / 平板**，**尽量复用现有代码**。
 > **已确定（2026-10）**：① **界面与底层手柄连接分离**，两边按 §4.2 的「引擎接口」各自开发；② 顺序：**P0a 抽核心 + Swift 接口 → P1 macOS 按接口改造并回归 →（P0b Kotlin 接口 → P2 Android 界面）→ P3 Android 底层 → P4 Windows 界面 → P5 Windows 底层**（§8）。
 > 本文已并入 2026-10-16 的审核意见（P0 拆分、测试数、`UserDefaults` 遗漏、Windows 蓝牙证据、A 档震动策略、补丁冲突规则、P1 验收补充、代码量估算 §12）。
 > 先读 README「设计思路」、[multi-controller-design.md](multi-controller-design.md)、[controller-speaker-design.md](controller-speaker-design.md)、[research/bluetooth-audio-findings.md](research/bluetooth-audio-findings.md)。
