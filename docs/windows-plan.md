@@ -1,7 +1,7 @@
 # Windows 版开发计划（P4 界面 + P5 底层，一起做）
 
 > 状态：**计划**，还没开始写代码。给「在一台 Windows 机器上开发」用：背景、要装什么、按什么顺序做、每一步怎么验收，都写在这里。
-> 已确定：界面用 **Compose Multiplatform（Desktop / JVM）**，复用 Android 的 Compose 界面、Kotlin 引擎接口和假引擎；底层复用 Swift 核心（编译成 Windows DLL）和 Android 引擎的会话逻辑；P4、P5 在同一个分支上连着做。
+> 已确定：界面用 **Compose Multiplatform（Desktop / JVM）**，复用 Android 的 Compose 界面、Kotlin 引擎接口和假引擎；底层复用 Swift 核心（编译成 Windows DLL）；**引擎复制一份**：Windows 引擎从 Android 引擎复制会话逻辑后独立修改，两边分开微调，Android 代码不动；P4、P5 在同一个分支上连着做。
 > 先读：[design-notes.md](design-notes.md)（整体结构）、[android.md](android.md)（Android 实测结论）、[cross-platform-design.md](cross-platform-design.md) §3.2 / §6（Windows 调研）。
 
 ## 0. 一页总结
@@ -11,21 +11,21 @@
 Compose 界面 ui  │ ControllerApp / Strings（Android 现有，改成 KMP 共享）│
 引擎接口         │ engine-api（纯 Kotlin，原样）                        │
 假引擎           │ engine-fake（纯 Kotlin，原样）                       │
-会话 / 引擎逻辑  │ engine-jvm（从 Android 引擎抽出：主循环、会话、对账、 │
-                 │   设置存储、状态快照、能力判断）                     │
 Swift 核心       │ ControllerCore + ControllerCAPI（编译成 .dll，原样）  │
                  └─────────────────────────────────────────────────────┘
                  ┌──────────────── Windows 新写 ──────────────────────┐
-desktop          │ Compose Desktop 窗口 + 托盘、Windows 平台适配（Kotlin）│
+desktop          │ Compose Desktop 窗口 + 托盘                             │
+engine-windows   │ Windows 引擎（Kotlin）：主循环、会话、对账、设置等从     │
+                 │   Android 引擎复制后改写，平台调用换成 Windows 的        │
 native-win       │ cvwin.dll（C++）：JNI 绑定、WASAPI 环回采集、          │
                  │   WASAPI 4 声道输出（HD + 扬声器）、Win32 HID、XInput、│
                  │   设备插拔通知、高精度定时                             │
                  └─────────────────────────────────────────────────────┘
 ```
 
-- **最快的路**：Android 版已经把「界面 ↔ 引擎接口 ↔ Kotlin 引擎 ↔ C 接口 ↔ Swift 核心」整条链路跑通了；Windows 只是把 Android 的平台层（UsbManager / AAudio / VibratorManager / MediaProjection）换成 Windows 的（Win32 HID / WASAPI / XInput），其余照搬。
+- **最快的路**：Android 版已经把「界面 ↔ 引擎接口 ↔ Kotlin 引擎 ↔ C 接口 ↔ Swift 核心」整条链路跑通了；Windows 只是把 Android 的平台层（UsbManager / AAudio / VibratorManager / MediaProjection）换成 Windows 的（Win32 HID / WASAPI / XInput），引擎的会话逻辑从 Android 复制过来改写，界面和 Swift 核心直接共用。
 - **实时线程不进 JVM**：采集回调、4 声道渲染回调都在 C++ 线程里直接调 Swift（`cv_core_process` / `cv_renderer_render`），和 Android 的 `usb_audio.c` / AAudio 回调一样。JVM 只跑 10ms 主循环和界面。
-- **预计**：新写约 2,500–3,500 行（C++ ~1,200，Kotlin ~1,000，Gradle / 脚本 / CI ~300，测试 ~300），另有约 800 行是从 Android 搬动 / 抽取。熟悉的人 1–2 周能出可用预览版（不含蓝牙 HD / 扬声器）。
+- **预计**：新写约 2,500–3,500 行（C++ ~1,200，Kotlin ~1,000，Gradle / 脚本 / CI ~300，测试 ~300），其中约 700 行是从 Android 引擎复制后改写的。熟悉的人 1–2 周能出可用预览版（不含蓝牙 HD / 扬声器）。
 
 ## 1. 背景（给没参与前面工作的人）
 
@@ -43,7 +43,7 @@ native-win       │ cvwin.dll（C++）：JNI 绑定、WASAPI 环回采集、   
 | `android/engine-api/` | Kotlin 引擎接口 `ControllerEngine`（StateFlow 状态 / 电平、事件、补丁命令）、数据类 | **原样** |
 | `android/engine-fake/` | 假引擎（5 种剧本） | **原样**，界面开发用 |
 | `android/ui/` | Compose 界面（手柄下拉、音乐 / 按摩、各开关滑块、电平条、中英文、宽屏两栏） | 改成 KMP：共享部分进 `commonMain`，授权弹窗等 Android 专有部分进 `androidMain` |
-| `android/engine/` | Android 真实引擎：`AndroidControllerEngine`（主循环、命令、状态）、`Session`（每个手柄的输出通道和每 tick 的执行）、`Discovery`、`DualSenseLink`（USB 直连 / Android 17 HID）、`SystemOutput`（系统震动）、`PlaybackCapture`、`cv_jni.c`、`usb_audio.c` | 平台无关的部分抽成 `engine-jvm` 两边共用；平台部分各写各的 |
+| `android/engine/` | Android 真实引擎：`AndroidControllerEngine`（主循环、命令、状态）、`Session`（每个手柄的输出通道和每 tick 的执行）、`Discovery`、`DualSenseLink`（USB 直连 / Android 17 HID）、`SystemOutput`（系统震动）、`PlaybackCapture`、`cv_jni.c`、`usb_audio.c` | **不改**。其中平台无关的部分（主循环、会话、对账、设置）复制到 Windows 引擎里改写 |
 | `Sources/ControllerMusicVisualizer/` | macOS 外壳 | 只作参考（行为规则的出处） |
 
 ### 1.3 Windows 平台事实（调研结论，见 cross-platform-design §3.2）
@@ -72,21 +72,21 @@ native-win       │ cvwin.dll（C++）：JNI 绑定、WASAPI 环回采集、   
 android/
   engine-api/      纯 Kotlin（原样）
   engine-fake/     纯 Kotlin（原样）
-  engine-jvm/      新：纯 Kotlin，从 android/engine 抽出的平台无关引擎（见 2.3）
-  engine/          Android 真实引擎（改为依赖 engine-jvm，只剩 Android 平台适配）
+  engine/          Android 真实引擎（不改）
   ui/              改为 Kotlin Multiplatform：commonMain（界面）+ androidMain + desktopMain
   app/             Android 组装（不变）
-  desktop/         新：Compose Desktop 应用 + Windows 平台适配（Kotlin）
+  engine-windows/  新：Windows 真实引擎（纯 Kotlin / JVM，从 engine 复制改写，见 2.3）
+  desktop/         新：Compose Desktop 应用（窗口、托盘、参数），组装 ui + engine-windows / engine-fake
 native-win/        新（仓库根目录）：cvwin.dll 的 CMake C++ 工程
 ```
 
-依赖方向：`ui → engine-api`；`engine-jvm → engine-api`；`engine`、`desktop` → `engine-jvm`；`desktop → ui, engine-fake`。
+依赖方向：`ui → engine-api`；`engine`、`engine-windows`、`engine-fake` → `engine-api`；`desktop → ui, engine-windows, engine-fake`。两个真实引擎之间没有依赖。
 
 ### 2.2 原生层：两个 DLL
 
 - **`ControllerCAPI.dll`**（Swift，`swift build -c release --product ControllerCAPI`）+ Swift 运行库 DLL（`swiftCore.dll`、`Foundation*.dll`、`_FoundationICU.dll`、`swift_Concurrency.dll`、`BlocksRuntime.dll`、`dispatch.dll` 等，以 `dumpbin /dependents` 为准）。
 - **`cvwin.dll`**（C++，MSVC 或 clang-cl）：
-  - **JNI 绑定**：把 `cv_jni.c` 里「核心 / 会话 / DualSense 报告 / 渲染器 / 字符串接口」这几段原样拿过来（不含 AAudio 段），Java 侧类名不同（`app.cmv.engine.desktop.NativeCore`），用宏改函数名前缀即可。
+  - **JNI 绑定**：把 `cv_jni.c` 里「核心 / 会话 / DualSense 报告 / 渲染器 / 字符串接口」这几段原样拿过来（不含 AAudio 段），Java 侧类名不同（`app.cmv.engine.windows.NativeCore`），用宏改函数名前缀即可。
   - **采集**：WASAPI 环回线程 → 交错立体声 float → `cv_core_process`。
   - **手柄音频**：WASAPI 共享模式、事件驱动的 4 声道输出 → 回调里 `cv_renderer_render`。
   - **HID**：SetupAPI / `CM_Get_Device_Interface_List` 枚举 Sony 054C:0CE6 / 0DF2，`CreateFile` 打开（重叠 I/O），`WriteFile` 发、读线程 `ReadFile` 收；取 `HidD_GetAttributes`、`HidP_GetCaps`（报告长度）、`DEVPKEY_Device_ContainerId`、总线类型（USB / 蓝牙）。
@@ -96,28 +96,30 @@ native-win/        新（仓库根目录）：cvwin.dll 的 CMake C++ 工程
 
 为什么平台层用 C++ 不用 Swift：WASAPI 是 COM 接口，C++ 写最顺；Swift 在 Windows 上调 COM 很别扭。为什么不用 JNA / Java FFM 直接调 C 接口：实时音频回调不能进 JVM，反正要有一个原生 DLL，JNI 层又能直接从 Android 搬过来。
 
-### 2.3 `engine-jvm`：从 Android 引擎抽出来的部分
+### 2.3 `engine-windows`：从 Android 引擎复制
 
-`AndroidControllerEngine`（465 行）+ `Session`（345 行）里大部分是平台无关的规则，抽成 `engine-jvm`，两个平台各实现一组接口：
+**为什么复制而不抽公共模块**：Android 引擎里有很多按实机调出来的细节（录屏授权保留时长、灯光节流、力度曲线、USB 等时传输），Windows 上的设备行为也会不同、要单独调。两个引擎分开，各自改、各自微调，互不影响，也不用在 Windows 机器上回归 Android。代价是共通规则要手动同步（见下面的清单）。
 
-```kotlin
-// engine-jvm 里定义，Android / Windows 各自实现
-interface Platform {
-    fun discover(): List<Found>                       // 当前连接的手柄（身份、名字、连接方式、可用通道）
-    fun onDevicesChanged(cb: () -> Unit)              // 插拔通知 → 重新扫描
-    fun openDualSenseLink(f: Found): DualSenseLink?   // HID 收发（Android：USB 直连 / HID17；Windows：Win32 HID）
-    fun openControllerAudio(f: Found, core: Long, haptics: Boolean): ControllerAudioOut?   // 4 声道输出
-    fun openRumble(f: Found): GenericRumble?          // 其他手柄（Android：VibratorManager；Windows：XInput）
-    fun capture(): CaptureSource                      // 系统声音采集
-    val store: KeyValueStore                          // 设置存储
-    fun foreground(running: Boolean)                  // Android：前台服务；Windows：托盘提示（可空实现）
-}
-```
+**复制清单**（`android/engine/src/main/kotlin/app/cmv/engine/android/` → `android/engine-windows/src/main/kotlin/app/cmv/engine/windows/`）：
 
-- 搬进 `engine-jvm`：主循环（10ms tick、约 33Hz 发电平和状态）、命令处理、`Session` 的启停 / 每 tick 执行（调 `NativeCore.sessionTick` 再分发给 link / audio / rumble）、对账（经 C 接口调 Swift 的 `SessionReconciler`）、设置记忆与 D5、能力判断与引擎名文字、对齐延迟、延迟分解。
-- `NativeCore`：两个平台各一份 `external fun` 声明（JNI 函数名带包名，没法共用一个类），在 `engine-jvm` 里抽一个 `CoreBindings` 接口包一层。
-- Android 侧留下：`Discovery`、`DualSenseLink`（USB 直连 / HID17）、`SystemOutput`、`PlaybackCapture`、`EngineService`、`ControllerAudio`、`cv_jni.c` / `usb_audio.c`。
-- **抽取必须保持 Android 行为不变**：CI 的模拟器测试照跑；改完在 Android 机上过一遍 `docs/android.md` 的主要场景（USB 直连 HD + 扬声器、蓝牙系统震动、插拔）。如果手边没有 Android 设备，W3 可以先只建 `engine-jvm` 给 Windows 用，Android 改为依赖它的那一步放到有设备时再做（两份代码短期并存，比 Android 回归失败好）。
+| Android 文件 | 复制后怎么改 |
+|---|---|
+| `AndroidControllerEngine.kt`（465 行） | → `WindowsControllerEngine.kt`。保留：单线程执行器、10ms 主循环（约 33Hz 发电平和状态）、命令处理、对账（经 C 接口调 Swift 的 `SessionReconciler`）、设置记忆与 D5、状态快照。删掉：MediaProjection / 前台服务 / USB 权限广播 / Android 17 HID / 扳机轴转发。换成：WASAPI 采集的启停（不需要授权，`provideCaptureConsent` 空实现）、插拔通知轮询、XInput 槽位扫描 |
+| `Session.kt`（345 行） | → 同名。保留：能力判断、引擎名文字、设置变化时的重启规则、启停顺序（先停音频再恢复 HID）、每 tick 调 `sessionTick` 再分发、对齐延迟、延迟分解。换成：`DualSenseLink` 用 Win32 HID 实现、手柄音频用 WASAPI、`SystemOutput` 换成 XInput 的 `GenericRumble`；删掉 USB 直连 / HID17 / 系统灯光那几条分支和「授权」提示 |
+| `NativeCore.kt`（82 行） | → 同名，包名改为 `app.cmv.engine.windows`（JNI 函数名带包名）；去掉 AAudio / USB 音频那几个，加 Windows 原生层的函数（采集、WASAPI 输出、HID、XInput、通知计数） |
+| `SettingsStore.kt`（26 行） | → 同名，`SharedPreferences` 换成 `%APPDATA%\ControllerMusicVisualizer\settings.json`（同样的 JSON 格式） |
+| `Discovery.kt`（72 行） | 只参考身份规则，按 §W6 重写 |
+| `DualSenseLink.kt`（126 行） | 只复制 `DualSenseLink` 接口和输入解析（`InputParser`），实现重写 |
+| 其余（`SystemOutput`、`PlaybackCapture`、`ControllerAudio`、`EngineService`、`Hid17Link`） | 不复制，Windows 有自己的对应物 |
+
+**两个引擎要保持一致的规则**（改一边时检查另一边；在两个文件顶部注释里各写一句「与 Android / Windows 引擎同步的规则见 docs/windows-plan.md §2.3」）：
+
+- 会话重启条件：只有身份、连接方式或「来源 / 震动 / HD / 扬声器」开关变化才重启；音量、阻尼、灯光速度等实时生效。
+- 停止顺序：先停手柄音频（扬声器淡出），再发恢复默认的 HID 报告。
+- 能力 → 设置项显示（D8）、新手柄复制选中手柄的设置（D5）、设置保存的键和格式（`controllerSettings.v1`）。
+- 状态快照的节奏（命令立即发、内部变化约 33Hz 合并发）和电平频率（约 30Hz）。
+
+Swift 核心里的规则（每 tick 的计算、报告构造、对账、对齐延迟、渲染）两边本来就共用，不在这个清单里。
 
 ### 2.4 `ui` 改成 Kotlin Multiplatform
 
@@ -201,14 +203,13 @@ cd android
 
 **验收**：Windows 上 145 个 Swift 测试通过；`out/x64/` 里有完整的 DLL 集合；CI 的 windows 任务绿。
 
-### W3 Kotlin 结构调整（1 天）
+### W3 界面改成多平台（半天）
 
-1. `ui` 改成 KMP（`kotlin("multiplatform")` + Compose Multiplatform 插件 + `com.android.library`），按 §2.4 拆 `commonMain / androidMain / desktopMain`。Compose Multiplatform 版本选与 Kotlin 2.3.21 兼容的那一版（看 JetBrains 的兼容表）；AGP 保持 8.13.2。
-2. 新建 `engine-jvm`，按 §2.3 抽出平台无关的引擎；`engine`（Android）改为实现 `Platform`。
-3. `settings.gradle.kts` 加开关：`-PdesktopOnly` 时不 include `engine`、`app`，且 `ui` 不配置 Android 目标（没装 Android SDK 也能编 desktop）。
-4. Android 回归：`./gradlew :app:assembleRelease` 能出 APK；CI 的模拟器测试绿；有设备时按 `docs/android.md` 过一遍主要场景。
+1. `ui` 改成 KMP（`kotlin("multiplatform")` + Compose Multiplatform 插件 + `com.android.library`），按 §2.4 拆 `commonMain / androidMain / desktopMain`。界面代码本身不动，只把三四个 Android 专有的函数挪进 `androidMain`。Compose Multiplatform 版本选与 Kotlin 2.3.21 兼容的那一版（看 JetBrains 的兼容表）；AGP 保持 8.13.2。
+2. `settings.gradle.kts` 加开关：`-PdesktopOnly` 时不 include `engine`、`app`，且 `ui` 不配置 Android 目标（没装 Android SDK 也能编 desktop）。
+3. Android 确认：CI 的模拟器测试绿，CI 出的 APK 装上点一遍界面（这一步只动了界面的文件位置，不需要细测）。
 
-**验收**：Android 行为不变（CI 绿 + 实机抽查）；`ui` 的 `desktopMain` 能编译。
+**验收**：`ui` 的 `desktopMain` 能编译；Android 界面不变。Android 引擎不动。
 
 ### W4 Desktop 应用 + 假引擎（P4 验收，1 天）
 
@@ -221,22 +222,23 @@ cd android
 ### W5 cvwin.dll 骨架 + JNI + 采集（1 天）
 
 - `native-win/` CMake 工程：`cvwin.dll` 链接 `ControllerCAPI.lib`（导入库）、`ole32`、`avrt`（MMCSS）、`hid`、`setupapi`、`cfgmgr32`、`xinput`、`winmm`。
-- JNI：按 §2.2 从 `cv_jni.c` 搬核心几段；Kotlin 侧 `desktop/.../NativeCore.kt`（外部函数声明与 Android 的一一对应）。
+- JNI：按 §2.2 从 `cv_jni.c` 搬核心几段；Kotlin 侧 `engine-windows/.../NativeCore.kt`（从 Android 复制，见 §2.3）。
 - DLL 加载：启动时 `System.load` 绝对路径加载 `cvwin.dll`；`cvwin.dll` 的 `DllMain` 或第一个调用里 `SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS) + AddDllDirectory(<自己所在目录>)`，保证 Swift 运行库从同一目录加载，而不是从 PATH 里随便找到的另一个 Swift 版本（见 §5.3）。
 - 采集：WASAPI 环回线程（`AUDCLNT_STREAMFLAGS_LOOPBACK`，48kHz float 立体声；设备格式不同就用 `AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM`），MMCSS「Pro Audio」优先级，每块直接 `cv_core_process`；默认设备切换时重开（`IMMNotificationClient::OnDefaultDeviceChanged`）。
 - `timeBeginPeriod(1)`，Kotlin 主循环 10ms。
 - 先用一个临时的 Windows 引擎：只有采集 + 一个「把电平发给界面」的假会话，确认整条链路（采集 → Swift 分析 → JNI → Kotlin → Compose 电平条）通了。
-- JNI 冒烟测试：`desktop` 模块的 JVM 测试里把每个 native 函数调一遍（对应 Android 的 `NativeCoreTest`）。
+- JNI 冒烟测试：`engine-windows` 模块的 JVM 测试里把每个 native 函数调一遍（对应 Android 的 `NativeCoreTest`）。
 
 **验收**：放音乐时界面电平条跟着跳；JNI 测试通过。
 
 ### W6 Windows 引擎：DualSense USB（2–3 天，主体）
 
-1. **发现**：Kotlin 侧 `WindowsPlatform.discover()` 调 `cvwin` 枚举 HID + 音频端点 + XInput 槽位，生成 `Found`：
+0. 按 §2.3 的清单把 Android 引擎复制到 `engine-windows`，先删掉 Android 专有分支、编译通过（平台调用先留空实现）。
+1. **发现**：Kotlin 侧 `Discovery.discover()` 调 `cvwin` 枚举 HID + 音频端点 + XInput 槽位，生成 `Found`：
    - DualSense：身份 = USB 时 ContainerId（`ds:win:<containerId>`），蓝牙时 HID 路径里的蓝牙地址（`ds:bt:<mac>`）；`link` = USB / 蓝牙；音频端点按 ContainerId 对上（只有一个手柄时退回按名字）。
    - XInput 手柄：身份 = `gp:xinput:<slot>`（XInput 拿不到序列号，按槽位）。
 2. **HID**：`DualSenseLink` 的 Windows 实现：发送队列 + 专用写线程（`WriteFile` 会阻塞，不能在主循环里等），读线程解析输入报告（`cv_ds_parse_input`）给 L2/R2 / 电量。打开失败（被 Steam / HidHide 占用）时，卡片显示「这个手柄被别的程序占用（Steam / DS4Windows 等），请先退出」（复用 `ControllerInfo.access` 的提示位置，或在状态里给 `error`）。
-3. **4 声道输出**：`ControllerAudioOut` 的 Windows 实现：WASAPI 共享模式、事件驱动、`IAudioClient3::InitializeSharedAudioStream` 取最小周期（不支持时退回 `Initialize` + 10ms），回调里 `cv_renderer_render`。HD / 扬声器的开关、淡出、对齐延迟全部沿用 `engine-jvm` 里的逻辑。
+3. **4 声道输出**：`ControllerAudioOut` 的 Windows 实现：WASAPI 共享模式、事件驱动、`IAudioClient3::InitializeSharedAudioStream` 取最小周期（不支持时退回 `Initialize` + 10ms），回调里 `cv_renderer_render`。HD / 扬声器的开关、淡出、对齐延迟沿用复制过来的 `Session` 逻辑。
 4. **插拔**：`CM_Register_Notification` + `IMMNotificationClient` → Kotlin 重新扫描 → 对账；只在身份 / 连接方式变化时重启会话（§1.4）。
 5. **托盘 / 后台**：窗口关了照样跑；退出时所有手柄恢复默认（停止报告、扬声器关、HD 关）。
 
@@ -287,13 +289,13 @@ JRE（jlink 精简）约 50–70MB + Swift 运行库约 60MB（其中 ICU 约 30
 |---|---|---|---|
 | Swift 核心 + C 接口 | `Sources/` | 原样（可能有少量 Windows 兼容修正） | 0–100 |
 | 契约样例 / Kotlin 接口 / 假引擎 | `contract/`、`engine-api`、`engine-fake` | 原样 | 0 |
-| 界面 | `android/ui` | 改 KMP，Android 专有部分收进 expect/actual | 150–250（大多是搬动） |
-| 引擎逻辑 | `android/engine` | 抽成 `engine-jvm` 两边共用 | 300–500（大多是搬动） |
+| 界面 | `android/ui` | 共享：改 KMP，Android 专有部分收进 expect/actual | 150–250（大多是搬动） |
+| 引擎逻辑 | `android/engine` | 复制到 `engine-windows` 后改写（Android 不动） | 约 700 复制 + 300–500 改写 |
 | Desktop 应用 | 新 | 窗口、托盘、参数、Windows 平台适配 | 500–700 Kotlin |
 | cvwin.dll | 新（JNI 段搬 `cv_jni.c`） | WASAPI ×2、HID、XInput、通知、定时 | 1,000–1,400 C++ |
 | 探测程序 | 新 | 一次性 | 150 |
 | 构建脚本 / CI / 打包 | 新 | 仿照 Android 的脚本和 CI | 200–300 |
-| 测试 | 新 | JNI 冒烟、Windows 引擎单测（用假 Platform） | 200–300 |
+| 测试 | 新 | JNI 冒烟、Windows 引擎单测（平台调用用假实现） | 200–300 |
 | 文档 | 新 | `docs/windows.md`、README | — |
 
 ## 7. 实测记录（W1 起在这里补）
