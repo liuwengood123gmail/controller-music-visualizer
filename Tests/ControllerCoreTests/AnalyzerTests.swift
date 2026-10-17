@@ -1,5 +1,5 @@
 import XCTest
-@testable import ControllerMusicVisualizer
+@testable import ControllerCore
 
 final class AnalyzerTests: XCTestCase {
     private let sr: Float = 48000

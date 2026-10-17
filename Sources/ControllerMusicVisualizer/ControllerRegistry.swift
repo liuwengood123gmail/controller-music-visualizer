@@ -1,3 +1,4 @@
+import ControllerCore
 import Foundation
 import GameController
 
@@ -70,63 +71,47 @@ final class ControllerRegistry {
     }
 
     /// 对照当前连接情况更新会话列表。可以频繁调用：连接方式没变化的会话完全不会被动。
+    /// 怎么对上（沿用 / USB ↔ 蓝牙迁移 / 新建 / 移除）由 ControllerCore 的 `SessionReconciler` 决定
     func refresh() {
         let found = discover()
-        var remaining = sessions
-        var unmatched: [Found] = []
+        let plan = SessionReconciler.plan(existing: sessions.map(\.identity), found: found.map(\.identity))
         var result: [ControllerSession] = []
+        var added: [ControllerSession] = []
 
-        for f in found {
-            if let i = remaining.firstIndex(where: { $0.identity == f.identity }) {
-                let s = remaining.remove(at: i)
+        for slot in plan.slots {
+            switch slot {
+            case .keep(let i, let fi):
+                let s = sessions[i], f = found[fi]
                 s.update(identity: f.identity, hid: f.hid, gc: f.gc)
                 result.append(s)
-            } else {
-                unmatched.append(f)
+            case .migrate(let i, let fi):
+                // 同一台 DualSense 换了连接方式：记住旧身份下的设置，会话沿用
+                let s = sessions[i], f = found[fi]
+                store.save(s.settings, for: s.identity)
+                s.update(identity: f.identity, hid: f.hid, gc: f.gc)
+                result.append(s)
+            case .add(let fi):
+                let f = found[fi]
+                var settings = ControllerSettings.initial(remembered: store.load(f.identity),
+                                                          copying: selectedSettings())
+                adjustNew(&settings)
+                let s = ControllerSession(identity: f.identity, hid: f.hid, gc: f.gc,
+                                          settings: settings, waveform: waveform, feed: feed,
+                                          tuning: tuning, tapTiming: tapTiming)
+                added.append(s)
+                result.append(s)
             }
         }
 
-        // 同一台 DualSense 在 USB ↔ 蓝牙之间切换时身份会变（USB 没有序列号）：
-        // 一台 DualSense 消失、同时恰好出现一台新的，就当作同一台，沿用它的设置
-        let goneDualSense = remaining.filter { $0.identity.kind == .dualSense }
-        let newDualSense = unmatched.filter { $0.identity.kind == .dualSense }
-        if goneDualSense.count == 1, newDualSense.count == 1,
-           let s = goneDualSense.first, let f = newDualSense.first {
-            store.save(s.settings, for: s.identity)
-            s.update(identity: f.identity, hid: f.hid, gc: f.gc)
-            remaining.removeAll { $0 === s }
-            unmatched.removeAll { $0.identity == f.identity }
-            result.append(s)
-        }
-
-        var added: [ControllerSession] = []
-        for f in unmatched {
-            var settings = ControllerSettings.initial(remembered: store.load(f.identity),
-                                                      copying: selectedSettings())
-            adjustNew(&settings)
-            let s = ControllerSession(identity: f.identity, hid: f.hid, gc: f.gc,
-                                      settings: settings, waveform: waveform, feed: feed,
-                                      tuning: tuning, tapTiming: tapTiming)
-            added.append(s)
-            result.append(s)
-        }
-
         // 手柄断开：记住它的设置，停止并释放
-        for s in remaining {
+        let removed = plan.removed.map { sessions[$0] }
+        for s in removed {
             store.save(s.settings, for: s.identity)
             s.retire()
         }
 
-        // 保持原有顺序，新手柄排在后面
-        let order = Dictionary(uniqueKeysWithValues: sessions.enumerated().map { ($1.id, $0) })
-        result = result.enumerated().sorted { a, b in
-            let oa = order[a.element.id] ?? Int.max, ob = order[b.element.id] ?? Int.max
-            return oa != ob ? oa < ob : a.offset < b.offset
-        }.map(\.element)
-
-        let changed = result.map(\.id) != sessions.map(\.id)
         sessions = result
-        if changed { onChange(added, remaining) }
+        if plan.changed { onChange(added, removed) }
     }
 
     func saveAll() {

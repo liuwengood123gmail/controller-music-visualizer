@@ -1,5 +1,6 @@
 import Foundation
 import IOKit.hid
+import ControllerCore
 
 /// 直接向 DualSense 发送 HID 输出报告：震动、扳机阻尼、灯条合在一份报告里。
 ///
@@ -16,61 +17,40 @@ final class DualSenseHID: HapticOutput {
 
     private let manager: IOHIDManager
     private let device: IOHIDDevice
-    private let bluetooth: Bool
-    var isBluetooth: Bool { bluetooth }
+    /// 报告内容和发送规则（交给游戏、恢复默认、定期重发、蓝牙序号）在 ControllerCore 里，这里只负责发出去
+    private let output: DualSenseOutputController
+    var isBluetooth: Bool { output.bluetooth }
 
     /// HD 震动模式：关掉兼容震动开关，手柄改由 USB 音频第 3/4 声道的波形驱动（只有 USB 可用）
-    var hdHaptics = false { didSet { if hdHaptics != oldValue { dirty = true } } }
+    var hdHaptics: Bool {
+        get { output.hdHaptics }
+        set { output.hdHaptics = newValue }
+    }
 
-    /// 各项由 App 控制还是交给游戏。交给游戏的项不设置「生效」标志位，手柄保留游戏的设置；
-    /// 三项都交给游戏时完全不发报告。
-    /// 手柄会一直保留最后收到的设置，所以交出去的那一刻先发一次「恢复默认」再放手
-    var controlsRumble = true {
-        didSet { if controlsRumble != oldValue { releaseRumble = !controlsRumble; handedOver() } }
+    /// 各项由 App 控制还是交给游戏（见 DualSenseOutputController）
+    var controlsRumble: Bool {
+        get { output.controlsRumble }
+        set { output.controlsRumble = newValue }
     }
-    var controlsTriggers = true {
-        didSet { if controlsTriggers != oldValue { releaseTriggers = !controlsTriggers; handedOver() } }
+    var controlsTriggers: Bool {
+        get { output.controlsTriggers }
+        set { output.controlsTriggers = newValue }
     }
-    var controlsLights = true {
-        didSet { if controlsLights != oldValue { releaseLights = !controlsLights; handedOver() } }
+    var controlsLights: Bool {
+        get { output.controlsLights }
+        set { output.controlsLights = newValue }
     }
-    private var releaseRumble = false, releaseTriggers = false, releaseLights = false
-
-    /// 扬声器通路：打开后路径固定为 3（耳机静音，扬声器 ← 右声道）；关闭 / 停止时发一次路径 0 再放手
-    private var speakerOn = false
-    private var speakerVolume: UInt8 = 0x64, speakerPreamp: UInt8 = 0
-    private var releaseSpeaker = false
 
     func setSpeaker(_ on: Bool, hwVolume: UInt8 = 0x64, preamp: UInt8 = 0) {
-        if on == speakerOn && (!on || (hwVolume == speakerVolume && preamp == speakerPreamp)) { return }
-        if !on && speakerOn { releaseSpeaker = true }
-        speakerOn = on
-        speakerVolume = hwVolume; speakerPreamp = preamp
-        handedOver()
+        output.setSpeaker(on, hwVolume: hwVolume, preamp: preamp)
     }
-
-    /// 控制权变化后立即发送（交出的项这一次会发默认值）
-    private func handedOver() {
-        dirty = true
-        flush()
-    }
-    private var seq: UInt8 = 0
-
-    private var motorLeft: UInt8 = 0
-    private var motorRight: UInt8 = 0
-    private var resistance: UInt8 = 0
-    private var light: (UInt8, UInt8, UInt8) = (0, 64, 255)
-    private var playerLEDs: UInt8 = 0b00100   // 默认只亮中间一颗
-    private var dirty = true
-    private var lastSent = Date.distantPast
-
-    /// 状态不变时也定期重发，盖掉系统在切换前后台时发出的重置
-    private static let keepAlive: TimeInterval = 0.1
 
     private init(manager: IOHIDManager, device: IOHIDDevice, bluetooth: Bool) {
         self.manager = manager
         self.device = device
-        self.bluetooth = bluetooth
+        output = DualSenseOutputController(bluetooth: bluetooth) { report in
+            IOHIDDeviceSetReport(device, kIOHIDReportTypeOutput, CFIndex(report[0]), report, report.count) == kIOReturnSuccess
+        }
         self.name = bluetooth ? Bilingual(zh: "直接控制（蓝牙）", en: "Direct control (Bluetooth)")
                               : Bilingual(zh: "直接控制（USB）", en: "Direct control (USB)")
     }
@@ -119,86 +99,25 @@ final class DualSenseHID: HapticOutput {
         // 但没有被打开，发报告会失败、退回 GameController（后台扳机阻尼失效）。所以每次都显式打开设备
         IOHIDDeviceOpen(info.device, IOOptionBits(kIOHIDOptionsTypeNone))
         let hid = DualSenseHID(manager: info.manager, device: info.device, bluetooth: info.bluetooth)
-        return hid.send() ? hid : nil
+        return hid.output.send() ? hid : nil
     }
 
     // MARK: - HapticOutput
 
-    func set(left: Float, right: Float) {
-        // DualSense 的兼容震动：左 = 重马达，右 = 轻马达
-        let l = byte(left), r = byte(right)
-        if l != motorLeft || r != motorRight {
-            motorLeft = l; motorRight = r; dirty = true
-        }
-        flush()
-    }
+    /// DualSense 的兼容震动：左 = 重马达，右 = 轻马达。每 10ms 调用，顺便负责定期重发
+    func set(left: Float, right: Float) { output.set(left: left, right: right) }
 
-    func stop() {
-        motorLeft = 0; motorRight = 0; resistance = 0
-        light = (0, 64, 255)   // 恢复默认蓝色
-        hdHaptics = false      // 恢复兼容震动，不影响其他游戏和 App
-        playerLEDs = 0b00100
-        if speakerOn { speakerOn = false; releaseSpeaker = true }   // 恢复扬声器通路为默认（静音）
-        _ = send()
-    }
+    func stop() { output.stop() }
 
     // MARK: - 扳机 / 灯条
 
     /// 0 = 关闭，1 = 最硬
-    func setTriggerResistance(_ strength: Float) {
-        let v = byte(strength)
-        if v != resistance { resistance = v; dirty = true }
-    }
+    func setTriggerResistance(_ strength: Float) { output.setTriggerResistance(strength) }
 
-    func setLight(_ r: Float, _ g: Float, _ b: Float) {
-        let c = (byte(r), byte(g), byte(b))
-        if c != light { light = c; dirty = true }
-    }
+    func setLight(_ r: Float, _ g: Float, _ b: Float) { output.setLight(r, g, b) }
 
     /// 下方 5 颗白灯，bit0…bit4 从左到右
-    func setPlayerLEDs(_ mask: UInt8) {
-        let m = mask & 0x1F
-        if m != playerLEDs { playerLEDs = m; dirty = true }
-    }
-
-    // MARK: - 发送
-
-    private func flush() {
-        if dirty || Date().timeIntervalSince(lastSent) > Self.keepAlive { _ = send() }
-    }
-
-    @discardableResult
-    private func send() -> Bool {
-        let rumble = controlsRumble || releaseRumble
-        let triggers = controlsTriggers || releaseTriggers
-        let lights = controlsLights || releaseLights
-        let speakerTouched = speakerOn || releaseSpeaker
-        guard rumble || triggers || lights || speakerTouched else { return true }   // 全部交给游戏
-
-        // 交出去的项：这一次发送默认值
-        var motors = (motorLeft, motorRight), resist = resistance, rgb = light, leds = playerLEDs
-        var hd = hdHaptics
-        if releaseRumble { motors = (0, 0); hd = false }
-        if releaseTriggers { resist = 0 }
-        if releaseLights { rgb = (0, 64, 255); leds = 0b00100 }
-        releaseRumble = false; releaseTriggers = false; releaseLights = false
-
-        let state = DualSenseOutputState(rumble: rumble, triggers: triggers, lights: lights, hd: hd,
-                                         motorLeft: motors.0, motorRight: motors.1, resistance: resist,
-                                         rgb: rgb, playerLEDs: leds,
-                                         speaker: speakerOn ? .on(volume: speakerVolume, preamp: speakerPreamp)
-                                                            : (releaseSpeaker ? .off : .untouched))
-        releaseSpeaker = false
-        let report = DualSenseReport.make(state, bluetooth: bluetooth, seq: seq)
-        let reportID: CFIndex = bluetooth ? 0x31 : 0x02
-        if bluetooth { seq = (seq + 1) & 0x0F }
-        let ok = IOHIDDeviceSetReport(device, kIOHIDReportTypeOutput, reportID, report, report.count) == kIOReturnSuccess
-        dirty = false
-        lastSent = Date()
-        return ok
-    }
-
-    private func byte(_ v: Float) -> UInt8 { UInt8(clamping: Int((min(max(v, 0), 1) * 255).rounded())) }
+    func setPlayerLEDs(_ mask: UInt8) { output.setPlayerLEDs(mask) }
 }
 
 /// 一台已连接的 DualSense 在 HID 层的描述

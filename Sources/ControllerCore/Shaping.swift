@@ -2,9 +2,9 @@ import Foundation
 
 /// 每个手柄自己的震动整形：把分析器输出的原始特征，按这个手柄的「响应速度」「鼓点灵敏度」变成震动强度。
 /// 分析器只做一份（所有手柄共用），这里的状态属于各自的会话。
-struct VibrationShaper {
-    var sensitivity: Float = 0.5     // 0...1，鼓点检测灵敏度
-    var responsiveness: Float = 0.7  // 0...1，震动跟随速度（尤其是声音变小时）
+public struct VibrationShaper {
+    public var sensitivity: Float = 0.5     // 0...1，鼓点检测灵敏度
+    public var responsiveness: Float = 0.7  // 0...1，震动跟随速度（尤其是声音变小时）
 
     private var beatAvg: Float = 0
     private var beatPulse: Float = 0
@@ -12,7 +12,11 @@ struct VibrationShaper {
     private var bassSmooth: (Float, Float) = (0, 0)
     private var fullSmooth: (Float, Float) = (0, 0)
 
-    mutating func reset() { self = VibrationShaper(sensitivity: sensitivity, responsiveness: responsiveness) }
+    public mutating func reset() {
+        var fresh = VibrationShaper()
+        fresh.sensitivity = sensitivity; fresh.responsiveness = responsiveness
+        self = fresh
+    }
 
     /// 按响应速度在「柔和」和「灵敏」两端之间取时间常数（对数插值）
     private func tau(soft: Float, fast: Float) -> Float {
@@ -26,7 +30,7 @@ struct VibrationShaper {
     }
 
     /// dt = 距上次调用的时间（秒）。鼓点检测和两种平滑一直运行，切换模式时没有断档
-    mutating func update(_ f: MusicFrame, mode: MusicMode, dt: Float) -> (Float, Float) {
+    public mutating func update(_ f: MusicFrame, mode: MusicMode, dt: Float) -> (Float, Float) {
         // 鼓点检测：低音能量突然高于近期平均
         let mono = (f.bass.0 + f.bass.1) / 2
         let threshold = 2.2 - 1.2 * sensitivity          // 灵敏度 0 → 2.2 倍，1 → 1.0 倍
@@ -53,11 +57,13 @@ struct VibrationShaper {
         case .envelope: return fullSmooth
         }
     }
+
+    public init() {}
 }
 
 /// 每个手柄自己的灯条整形：亮度按「灯条速度」平滑；颜色只在「暗 → 亮」的瞬间按当时的三频段混合选定，亮着时保持
-struct LightShaper {
-    var lightSpeed: Float = 0.3      // 0...1：0 像呼吸灯，1 干脆地一闪一闪
+public struct LightShaper {
+    public var lightSpeed: Float = 0.3      // 0...1：0 像呼吸灯，1 干脆地一闪一闪
 
     private var lit = false
     private var barSmooth: Float = 0
@@ -68,7 +74,11 @@ struct LightShaper {
     private static let darkThreshold: Float = 0.12   // 低于它算暗了
     private static let litThreshold: Float = 0.25    // 高于它算重新亮起（两个门槛防止在边缘来回换色）
 
-    mutating func reset() { self = LightShaper(lightSpeed: lightSpeed) }
+    public mutating func reset() {
+        var fresh = LightShaper()
+        fresh.lightSpeed = lightSpeed
+        self = fresh
+    }
 
     /// 灯条用：按「灯条速度」在 慢（起 20ms、落 300ms）和 快（起 3ms、落 60ms）之间取值
     private func followBar(_ current: Float, _ target: Float, dt: Float) -> Float {
@@ -78,7 +88,7 @@ struct LightShaper {
     }
 
     /// level = 分析器的灯光亮度（左右），color = 三频段原始颜色。返回灯条亮度和已锁定的颜色（最亮通道 = 1）
-    mutating func update(level: (Float, Float), color: (r: Float, g: Float, b: Float), dt: Float)
+    public mutating func update(level: (Float, Float), color: (r: Float, g: Float, b: Float), dt: Float)
         -> (brightness: Float, color: (r: Float, g: Float, b: Float)) {
         let previous = barSmooth
         barSmooth = followBar(barSmooth, max(level.0, level.1), dt: dt)
@@ -104,14 +114,16 @@ struct LightShaper {
         falling = brightness < previous
         return (brightness, (latched.0, latched.1, latched.2))
     }
+
+    public init() {}
 }
 
 /// 下方 5 颗白灯做成从中间向两边跳的立体声电平灯，跟随整体音量近似实时；
 /// 只留约 80ms 的余晖防止在门槛边缘闪烁
-struct PlayerLEDMeter {
+public struct PlayerLEDMeter {
     private var hold: (Float, Float) = (0, 0)
 
-    mutating func mask(left: Float, right: Float) -> UInt8 {
+    public mutating func mask(left: Float, right: Float) -> UInt8 {
         let fall: Float = 0.12   // 每 10ms 最多下降 0.12
         hold.0 = max(left, hold.0 - fall)
         hold.1 = max(right, hold.1 - fall)
@@ -122,5 +134,22 @@ struct PlayerLEDMeter {
         if hold.1 > 0.45 { mask |= 0b01000 }
         if hold.1 > 0.8 { mask |= 0b10000 }
         return mask
+    }
+
+    public init() {}
+}
+
+/// HSV → RGB，h/s/v 都是 0...1
+public func hsv(_ h: Float, _ s: Float, _ v: Float) -> (Float, Float, Float) {
+    let h6 = (h - floorf(h)) * 6
+    let i = Int(h6) % 6, f = h6 - floorf(h6)
+    let p = v * (1 - s), q = v * (1 - s * f), t = v * (1 - s * (1 - f))
+    switch i {
+    case 0: return (v, t, p)
+    case 1: return (q, v, p)
+    case 2: return (p, v, t)
+    case 3: return (p, q, v)
+    case 4: return (t, p, v)
+    default: return (v, p, q)
     }
 }

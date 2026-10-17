@@ -19,3 +19,14 @@ jobs:
             echo "== $f"
             swiftc -swift-version 5 -typecheck -import-objc-header docs/research/opus-shim.h "$f"
           done
+
+  # ControllerCore 与平台无关：在 Linux 上也编译、跑测试，保证它不依赖 Apple 框架（Android / Windows 复用的前提）
+  core-linux:
+    runs-on: ubuntu-latest
+    container: swift:6.2
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build ControllerCore
+        run: swift build
+      - name: Test ControllerCore
+        run: swift test

@@ -1,33 +1,42 @@
 import AppKit
-import Combine
+import ControllerCore
 import CoreAudio
 import Foundation
 import GameController
 
-/// 一个手柄的运行时：持有它自己的设置、输出通道、按摩时间、灯条 / 震动整形状态和电平。
-/// 由 `AppModel` 的 100Hz 主循环依次调用 `tick`。
+/// 一个手柄的运行时（macOS 底层）：持有它自己的设置、输出通道和电平。
+/// 每 10ms 的计算（震动、扳机、灯光、对齐）在 ControllerCore 的 `SessionEngine` 里，这里只负责设备。
+/// 由 `AppModel` 的 100Hz 主循环依次调用 `tick`；界面看不到这个类型，只看到 `info` 快照。
 @MainActor
-final class ControllerSession: ObservableObject, Identifiable {
-    /// 会话的稳定编号（界面选中项用）；手柄换了连接方式（USB ↔ 蓝牙）时编号不变
-    let id = UUID()
+final class ControllerSession {
+    /// 会话的稳定编号；手柄换了连接方式（USB ↔ 蓝牙）时编号不变
+    let id: ControllerID = UUID().uuidString
     private(set) var identity: ControllerIdentity
 
-    @Published var settings: ControllerSettings { didSet { settingsChanged(from: oldValue) } }
-    @Published private(set) var hidInfo: DualSenseInfo?
-    @Published private(set) var gc: GCController?
+    /// 引擎持有的设置（唯一真源）；界面通过 `apply(_:)` 改
+    private(set) var settings: ControllerSettings
+    private(set) var hidInfo: DualSenseInfo?
+    private(set) var gc: GCController?
 
     /// 输出通道是否在运行
-    @Published private(set) var isActive = false
-    @Published private(set) var battery: (level: Int, charging: Bool)?
-    @Published private(set) var engineName = Bilingual(zh: "—", en: "—")
-    @Published private(set) var level: (Float, Float) = (0, 0)
-    /// 随机按摩当前轮播到的预设（界面显示用）
-    @Published private(set) var randomNow: MassagePreset?
-    @Published private(set) var errorMessage: Bilingual?
+    private(set) var isActive = false { didSet { if isActive != oldValue { changed() } } }
+    private(set) var battery: Battery? { didSet { if battery != oldValue { changed() } } }
+    private(set) var engineName = Bilingual(zh: "—", en: "—") { didSet { if engineName != oldValue { changed() } } }
+    /// 界面电平（强度之后、对齐之前）
+    private(set) var level: (Float, Float) = (0, 0)
+    /// 随机按摩当前轮播到的预设
+    private(set) var randomNow: MassagePreset? { didSet { if randomNow != oldValue { changed() } } }
+    private(set) var errorMessage: Bilingual? { didSet { if errorMessage != oldValue { changed() } } }
     /// 手柄扬声器相对 Mac 音响的延迟分解（扬声器同步播放运行时才有）
-    @Published private(set) var latency: LatencyBreakdown?
+    private(set) var latency: LatencyBreakdown? { didSet { if latency != oldValue { changed() } } }
     /// 调试信息：IO 缓冲帧数、环形缓冲余量、欠载次数
-    @Published private(set) var audioStats: String?
+    private(set) var audioStats: String? { didSet { if audioStats != oldValue { changed() } } }
+
+    /// 快照里的任何数值变了（AppModel 据此重发状态）
+    var onChange: () -> Void = {}
+    /// 设置变了（AppModel 据此保存、重新判断是否需要采集系统声音）
+    var onSettingsChange: () -> Void = {}
+    private func changed() { onChange() }
 
     /// 全局「开始」是否按下
     private(set) var armed = false
@@ -45,13 +54,8 @@ final class ControllerSession: ObservableObject, Identifiable {
     private let tapTiming: () -> DeviceTiming?
     private var controllerTiming = DeviceTiming()
     // 震动与扬声器的对齐：较快的一路加一点延迟（见 LatencyModel）
-    private var align = DelayLine()
-    private var alignClock = 0.0
     private var alignDelayMs = 0.0
-    private var massageTime: Double = 0
-    private var vibration = VibrationShaper()
-    private var lightShaper = LightShaper()
-    private var ledMeter = PlayerLEDMeter()
+    private var engine = SessionEngine()
 
     init(identity: ControllerIdentity, hid: DualSenseInfo?, gc: GCController?,
          settings: ControllerSettings, waveform: HapticWaveform, feed: SpeakerFeed,
@@ -96,39 +100,49 @@ final class ControllerSession: ObservableObject, Identifiable {
 
     var deviceName: String { isDualSense ? "DualSense" : (gc?.vendorName ?? "Controller") }
 
-    var linkText: Bilingual? {
-        if let hidInfo {
-            return hidInfo.bluetooth ? Bilingual(zh: "蓝牙", en: "Bluetooth") : Bilingual(zh: "USB", en: "USB")
-        }
+    var link: LinkKind? {
+        if let hidInfo { return hidInfo.bluetooth ? .bluetooth : .usb }
         // 只有 GameController 能看到 DualSense：USB 时会出现它的音频设备，否则就是蓝牙；其他手柄不知道连接方式
-        if isDualSense {
-            return CA.dualSenseOutputDevice() != nil ? Bilingual(zh: "USB", en: "USB")
-                                                    : Bilingual(zh: "蓝牙", en: "Bluetooth")
-        }
+        if isDualSense { return CA.dualSenseOutputDevice() != nil ? .usb : .bluetooth }
         return nil
     }
 
-    /// 下拉框里的名称：「DualSense · USB · 95%」
-    var title: String {
-        var parts = [deviceName]
-        if let link = linkText { parts.append(link.text) }
-        if let battery { parts.append("\(battery.level)%") }
-        return parts.joined(separator: " · ")
+    /// 给界面的快照
+    var info: ControllerInfo {
+        ControllerInfo(
+            id: id, name: deviceName, link: link, battery: battery,
+            capabilities: Capabilities(isDualSense: isDualSense, hasLight: hasLight,
+                                       hasAdaptiveTriggers: hasAdaptiveTriggers, hasHD: hasHD,
+                                       hasSpeaker: hasSpeaker, canVibrate: canVibrate),
+            settings: settings,
+            status: SessionStatus(isActive: isActive, engineName: engineName, error: errorMessage),
+            latency: latency, audioStats: audioStats, randomNow: randomNow)
     }
 
     func refreshBattery() {
-        var value: (level: Int, charging: Bool)?
+        var value: Battery?
         if let s = input?.state {
-            value = (s.batteryLevel, s.charging)
+            value = Battery(level: s.batteryLevel, charging: s.charging)
         } else if let b = gc?.battery, b.batteryState != .unknown || b.batteryLevel > 0 {
-            value = (Int((b.batteryLevel * 100).rounded()), b.batteryState == .charging)
+            value = Battery(level: Int((b.batteryLevel * 100).rounded()), charging: b.batteryState == .charging)
         }
-        if battery?.level != value?.level || battery?.charging != value?.charging { battery = value }
+        battery = value
     }
 
     func invalidateFeatures() { features.invalidate() }
 
     // MARK: - 设置变化
+
+    /// 改设置（只改补丁里给出的字段）
+    func apply(_ patch: SettingsPatch) {
+        let old = settings
+        let new = patch.apply(to: old)
+        guard new != old else { return }
+        settings = new
+        settingsChanged(from: old)
+        changed()
+        onSettingsChange()
+    }
 
     private func settingsChanged(from old: ControllerSettings) {
         let new = settings
@@ -206,10 +220,7 @@ final class ControllerSession: ObservableObject, Identifiable {
     private func startOutputs() {
         errorMessage = nil
         features.attach(gc)
-        vibration.reset()
-        lightShaper.reset()
-        ledMeter = PlayerLEDMeter()
-        massageTime = 0
+        engine.reset()
 
         // 优先直接发 HID 报告（后台也能保持扳机阻尼/灯条）；打不开再退回 GameController
         if let info = hidInfo, let h = DualSenseHID.open(info) {
@@ -255,8 +266,6 @@ final class ControllerSession: ObservableObject, Identifiable {
         if audio != nil && effSpeaker {
             engineName = Bilingual(zh: engineName.zh + " + 手柄扬声器", en: engineName.en + " + speaker")
         }
-        align.reset()
-        alignClock = 0
         updateAlignment()
         refreshLatency()
         NSLog("ControllerMusicVisualizer engine (%@): %@", identity.key, engineName.en)
@@ -295,64 +304,39 @@ final class ControllerSession: ObservableObject, Identifiable {
 
     func tick(music: MusicFrame, dt: Float, count: Int) {
         guard isActive else { return }
-        vibration.sensitivity = settings.sensitivity
-        vibration.responsiveness = settings.responsiveness
-        lightShaper.lightSpeed = settings.lightSpeed
-
-        // 扳机（交给游戏时完全不碰）：阻尼；R2 加强度，L2 减强度，按得越深变得越快
-        if effTriggers {
-            if let hid {
-                if hasAdaptiveTriggers { hid.setTriggerResistance(settings.triggerResistance) }
-            } else {
-                // 在后台时系统会重置扳机/灯条，每 0.5 秒补发一次
-                if !NSApplication.shared.isActive && count % 50 == 0 { features.invalidate() }
-                if hasAdaptiveTriggers { features.setTriggerResistance(settings.triggerResistance) }
-            }
-            let (lt, rt) = triggerReadings
-            let dz: (Float) -> Float = { $0 < 0.05 ? 0 : $0 * $0 }
-            let delta = (dz(rt) - dz(lt)) * 1.0 * dt
-            if delta != 0 { settings.intensity = min(max(settings.intensity + delta, 0), 3) }
-        }
-
-        var l: Float, r: Float
-        let lightLevel: (Float, Float), meterIn: (Float, Float)
-        switch settings.source {
-        case .music:
-            (l, r) = vibration.update(music, mode: settings.musicMode, dt: dt)
-            lightLevel = music.light
-            meterIn = music.meter
-        case .massage:
-            massageTime += Double(dt) * settings.speed
-            (l, r) = settings.preset.sample(massageTime)
-            let now = settings.preset == .random ? settings.preset.current(massageTime) : nil
-            if now != randomNow { randomNow = now }
-            lightLevel = (l, r)   // 按摩时灯光直接跟随按摩波形
-            meterIn = (l, r)
-        }
-        l = min(max(l * settings.intensity, 0), 1)
-        r = min(max(r * settings.intensity, 0), 1)
-        if !effVibration { l = 0; r = 0 }
-        level = (l, r)
-
-        // 对齐：较快的一路加一点延迟（HD 的强度包络早于缓冲里的载波；兼容震动早于扬声器）
-        alignClock += Double(dt)
         if count % 50 == 0 { updateAlignment() }
-        if alignDelayMs > 0 {
-            align.push(time: alignClock, l, r)
-            (l, r) = align.value(at: alignClock - alignDelayMs / 1000)
-        }
-        if let audio, hdActive {
-            let range = settings.source == .music ? settings.musicMode.carrierRange
-                                                   : settings.preset.carrierRange(massageTime)
-            audio.set(left: l, right: r, freq: hdFrequency(range, amplitude: max(l, r)),
-                   useMusic: settings.source == .music)
-            output?.set(left: 0, right: 0)   // HID 只负责扳机、灯光（并保持定期重发）
-        } else {
-            output?.set(left: l, right: r)   // 震动交给游戏时 HID 不设置马达强度，这里只为定期重发扳机、灯光
+        // 没有直连手柄时扳机 / 灯条走 GameController：在后台时系统会重置它们，每 0.5 秒补发一次
+        if hid == nil && effTriggers && !NSApplication.shared.isActive && count % 50 == 0 {
+            features.invalidate()
         }
 
-        // 灯光用强度之前的原始数值，强度调低也照样跳；交给游戏时完全不碰
-        if effLights { updateLight(level: lightLevel, meter: meterIn, color: music.color, dt: dt) }
+        let flags = SessionFlags(vibration: effVibration, triggers: effTriggers, lights: effLights,
+                                 adaptiveTriggers: hasAdaptiveTriggers, playerLEDs: hid != nil,
+                                 hdActive: hdActive && audio != nil)
+        let c = engine.tick(SessionTickInput(settings: settings, flags: flags, music: music,
+                                             triggers: triggerReadings, dt: dt, alignDelayMs: alignDelayMs))
+
+        if let v = c.triggerResistance {
+            if let hid { hid.setTriggerResistance(v) } else { features.setTriggerResistance(v) }
+        }
+        if let v = c.intensity {
+            // L2 / R2 改的强度也是设置：写回并通知界面（AppModel 节流后才重发状态）
+            settings.intensity = v
+            changed()
+            onSettingsChange()
+        }
+        level = c.level
+        randomNow = c.randomNow
+        if let hd = c.hd { audio?.set(left: hd.left, right: hd.right, freq: hd.freq, useMusic: hd.useMusic) }
+        output?.set(left: c.motors.left, right: c.motors.right)
+        if let light = c.light {
+            if let hid {
+                hid.setLight(light.r, light.g, light.b)
+                if let leds = c.playerLEDs { hid.setPlayerLEDs(leds) }
+            } else {
+                features.setLight(light.r, light.g, light.b)
+            }
+        }
     }
 
     // MARK: - 扬声器与对齐
@@ -393,33 +377,5 @@ final class ControllerSession: ObservableObject, Identifiable {
         }
         audioStats = String(format: "IO %d frames · margin %.1f ms · underruns %d · align %.0f ms",
                             audio.ioFrames, margin, audio.underruns, alignDelayMs)
-    }
-
-    /// HD 载波频率随强度变化：震动弱时用高频（细腻），强时降到 50–65Hz（实测马达最有劲的区间）。
-    /// 不低于 50Hz：再低马达反而没劲
-    private func hdFrequency(_ range: (low: Float, high: Float), amplitude a: Float) -> Float {
-        max(range.high - (range.high - range.low) * powf(a, 0.7), 50)
-    }
-
-    private func updateLight(level: (Float, Float), meter: (Float, Float),
-                             color: (r: Float, g: Float, b: Float), dt: Float) {
-        let r: Float, g: Float, b: Float
-        switch settings.source {
-        case .music:
-            // 三色混合：低频红、中频绿、高频蓝，各自跟随能量（底鼓+人声=黄，人声+镲片=青，全部=白）
-            let bar = lightShaper.update(level: level, color: color, dt: dt)
-            let v = (1 - settings.lightRange) + settings.lightRange * bar.brightness
-            (r, g, b) = (bar.color.r * v, bar.color.g * v, bar.color.b * v)
-        case .massage:
-            // 预设固定颜色，亮度跟随按摩波形
-            let v = (1 - settings.lightRange) + settings.lightRange * (0.15 + 0.85 * max(level.0, level.1))
-            (r, g, b) = hsv(settings.preset.hue(massageTime), 1, v)
-        }
-        if let hid {
-            hid.setLight(r, g, b)
-            hid.setPlayerLEDs(ledMeter.mask(left: meter.0, right: meter.1))
-        } else {
-            features.setLight(r, g, b)
-        }
     }
 }
