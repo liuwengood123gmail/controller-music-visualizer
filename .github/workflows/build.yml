@@ -68,7 +68,11 @@ jobs:
           /opt/swift/usr/bin/swift sdk install \
             https://download.swift.org/swift-$SWIFT_VERSION-release/android-sdk/swift-$SWIFT_VERSION-RELEASE/swift-$SWIFT_VERSION-RELEASE_android.artifactbundle.tar.gz \
             --checksum $SWIFT_ANDROID_SDK_SHA256
-          bash ~/.swiftpm/swift-sdks/swift-$SWIFT_VERSION-RELEASE_android.artifactbundle/swift-android/scripts/setup-android-sdk.sh
+          # 安装位置因版本而异（~/.swiftpm 或 ~/.config/swiftpm），找到 SDK 里的脚本把 NDK 关联进去
+          setup=$(find ~/.swiftpm ~/.config/swiftpm ~/.local/share/swiftpm -name setup-android-sdk.sh 2>/dev/null | head -1)
+          echo "setup script: $setup"
+          bash "$setup"
+          echo "SWIFT_SDKS_DIR=$(dirname $(dirname $(dirname $(dirname "$setup"))))" >> $GITHUB_ENV
       - name: Build Swift core for Android (arm64 + x86_64)
         run: SWIFT=/opt/swift/usr/bin/swift ABIS="arm64-v8a x86_64" android/scripts/build-swift-android.sh
       - name: Kotlin unit tests (contract fixtures, fake engine)
