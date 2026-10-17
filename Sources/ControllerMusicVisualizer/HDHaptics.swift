@@ -1,6 +1,7 @@
 import AudioToolbox
 import CoreAudio
 import Foundation
+import ControllerCore
 
 // MARK: - 手柄音频输出（HD 震动 + 扬声器）
 
@@ -16,47 +17,17 @@ import Foundation
 ///
 /// 两者可独立开关。只设本 App 打开的 AUHAL 实例，不改系统默认输出设备。
 final class DualSenseAudioOutput {
-    /// 渲染线程用到的全部状态。主线程只写下面「主线程写」的几项（单个 Float / Bool，对齐读写），
-    /// 渲染线程里不加锁、不分配内存。
-    fileprivate final class Context {
-        // 主线程写
-        var targetL: Float = 0, targetR: Float = 0, freq: Float = 150
-        var useMusic = false
-        var hapticsOn = false
-        var speakerTarget: Float = 0
-        var fixedMarginMs: Double = 0     // > 0 时固定余量，不自适应
-        var extraLagMs: Double = 0        // 额外让读位置更落后（用来延迟扬声器 / HD 载波）
-
-        var waveform: HapticWaveform?
-        var feed: SpeakerFeed?
-
-        // 渲染线程
-        var ampL: Float = 0, ampR: Float = 0, phase: Float = 0
-        var sampleRate: Float = 48000
-        var gainK: Float = 0.05
-        var cursor = RingCursor()
-        var margin = AdaptiveMargin()
-        var gain = GainRamp()
-        var lastWritten = 0
-        var stalledBlocks = 0
-        var marginMs: Double = 0          // 当前实际使用的余量（显示用）
-    }
-
+    /// 渲染逻辑（载波、扬声器读位置、音量渐变、限幅）在 ControllerCore 里，这里只负责 AUHAL
+    private let renderer: ControllerAudioRenderer
     private var unit: AudioUnit?
-    private let ctx = Context()
     /// 设备实际的 IO 缓冲帧数
     private(set) var ioFrames = 0
 
     init(device: AudioObjectID, waveform: HapticWaveform?, feed: SpeakerFeed?,
          haptics: Bool, tuning: SpeakerTuning) throws {
         let sr = CA.get(device, kAudioDevicePropertyNominalSampleRate, default: Float64(48000))
-        ctx.sampleRate = Float(sr)
-        ctx.gainK = GainRamp.coefficient(sampleRate: Float(sr))
-        ctx.waveform = waveform
-        ctx.feed = feed
-        ctx.hapticsOn = haptics
-        ctx.fixedMarginMs = tuning.bufferMs ?? 0
-        ctx.extraLagMs = max(-(tuning.hapticsDelayMs ?? 0), 0)
+        renderer = ControllerAudioRenderer(sampleRate: Float(sr), waveform: waveform, feed: feed,
+                                           haptics: haptics, tuning: tuning)
 
         var desc = AudioComponentDescription(componentType: kAudioUnitType_Output,
                                              componentSubType: kAudioUnitSubType_HALOutput,
@@ -83,7 +54,7 @@ final class DualSenseAudioOutput {
             mChannelsPerFrame: 4, mBitsPerChannel: 32, mReserved: 0)
         try check(AudioUnitSetProperty(u, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input, 0,
                                        &fmt, UInt32(MemoryLayout<AudioStreamBasicDescription>.size)), "设置 4 声道格式")
-        var cb = AURenderCallbackStruct(inputProc: audioRender, inputProcRefCon: Unmanaged.passUnretained(ctx).toOpaque())
+        var cb = AURenderCallbackStruct(inputProc: audioRender, inputProcRefCon: Unmanaged.passUnretained(renderer).toOpaque())
         try check(AudioUnitSetProperty(u, kAudioUnitProperty_SetRenderCallback, kAudioUnitScope_Input, 0,
                                        &cb, UInt32(MemoryLayout<AURenderCallbackStruct>.size)), "设置渲染回调")
         try check(AudioUnitInitialize(u), "初始化输出单元")
@@ -92,22 +63,22 @@ final class DualSenseAudioOutput {
 
     /// 左右强度 0...1；freq 为正弦载波频率；useMusic 为 true 时载波改用音乐低频波形
     func set(left: Float, right: Float, freq: Float, useMusic: Bool) {
-        ctx.targetL = left; ctx.targetR = right; ctx.freq = freq; ctx.useMusic = useMusic
+        renderer.set(left: left, right: right, freq: freq, useMusic: useMusic)
     }
 
     /// 扬声器的软件音量（线性增益，0 = 静音）；渲染线程里 10–20ms 渐变
-    func setSpeakerGain(_ gain: Float) { ctx.speakerTarget = gain }
+    func setSpeakerGain(_ gain: Float) { renderer.setSpeakerGain(gain) }
 
     /// 当前环形缓冲余量（毫秒）和累计欠载次数（调试显示用）
-    var marginMs: Double { ctx.marginMs }
-    var underruns: Int { ctx.cursor.underruns }
+    var marginMs: Double { renderer.marginMs }
+    var underruns: Int { renderer.underruns }
 
     func stop() {
         guard let u = unit else { return }
         unit = nil
         // 扬声器先淡出再停，避免咔哒声
-        if ctx.speakerTarget > 0 || ctx.gain.value > 0.001 {
-            ctx.speakerTarget = 0
+        if renderer.speakerAudible {
+            renderer.setSpeakerGain(0)
             usleep(25_000)
         }
         AudioOutputUnitStop(u)
@@ -120,82 +91,17 @@ final class DualSenseAudioOutput {
 
 private let audioRender: AURenderCallback = { refCon, _, _, _, frames, ioData in
     guard let ioData else { return noErr }
-    let ctx = Unmanaged<DualSenseAudioOutput.Context>.fromOpaque(refCon).takeUnretainedValue()
+    let renderer = Unmanaged<ControllerAudioRenderer>.fromOpaque(refCon).takeUnretainedValue()
     let abl = UnsafeMutableAudioBufferListPointer(ioData)
-    for buf in abl { if let p = buf.mData { memset(p, 0, Int(buf.mDataByteSize)) } }
     guard abl.count >= 4,
           let spkL = abl[0].mData?.assumingMemoryBound(to: Float.self),
           let spkR = abl[1].mData?.assumingMemoryBound(to: Float.self),
           let outL = abl[2].mData?.assumingMemoryBound(to: Float.self),
-          let outR = abl[3].mData?.assumingMemoryBound(to: Float.self) else { return noErr }
-
-    let sr = ctx.sampleRate
-    let n = Int(frames)
-    let blockSeconds = Double(n) / Double(sr)
-
-    let speakerTarget = ctx.speakerTarget
-    let speakerOn = speakerTarget > 0 || ctx.gain.value > 0.0005
-    let wantsMusicWave = ctx.hapticsOn && ctx.useMusic && ctx.waveform != nil
-
-    // 读位置：扬声器和 HD 音乐波形共用一个游标（两个缓冲在同一个采集回调里各写同样多的样本，位置一一对应）
-    var pos = 0.0, step = 1.0
-    var haveSource = false
-    if (speakerOn || wantsMusicWave), let feed = ctx.feed {
-        let srate = Double(feed.sampleRate)
-        let nominal = srate / Double(sr)
-        let written = feed.written.pointee
-        if written == ctx.lastWritten { ctx.stalledBlocks += 1 } else { ctx.stalledBlocks = 0; ctx.lastWritten = written }
-        if ctx.stalledBlocks > 12 {
-            ctx.cursor.stall()   // 采集停了：输出静音，数据恢复后重新对齐
-        } else {
-            let floorMs = LatencyModel.minMarginMs(chunkFrames: feed.lastChunk.pointee,
-                                                   outBlockFrames: Double(n) * nominal, sampleRate: srate)
-            let marginMs = (ctx.fixedMarginMs > 0 ? ctx.fixedMarginMs : floorMs + ctx.margin.extraMs) + ctx.extraLagMs
-            ctx.marginMs = marginMs
-            let before = ctx.cursor.underruns
-            step = ctx.cursor.prepare(written: Double(written), frames: n, nominalStep: nominal,
-                                      target: marginMs * srate / 1000, blockSeconds: blockSeconds)
-            ctx.margin.update(underrun: ctx.cursor.underruns > before, dt: blockSeconds)
-            pos = ctx.cursor.readPos
-            haveSource = true
-        }
+          let outR = abl[3].mData?.assumingMemoryBound(to: Float.self) else {
+        for buf in abl { if let p = buf.mData { memset(p, 0, Int(buf.mDataByteSize)) } }
+        return noErr
     }
-
-    let inc = 2 * Float.pi * ctx.freq / sr
-    let k = 1 - expf(-1 / (0.003 * sr))   // 强度 3ms 平滑，避免爆音
-    let wave = wantsMusicWave && haveSource ? ctx.waveform : nil
-    let feed = haveSource ? ctx.feed : nil
-
-    for i in 0..<n {
-        let idx = Int(pos)
-        // 扬声器：线性插值取样 × 软件音量（渐变）→ 软限幅，同样的单声道写到第 1、2 声道
-        let g = ctx.gain.step(target: speakerTarget, k: ctx.gainK)
-        if let feed, g > 0.00001 {
-            let f = Float(pos - Double(idx))
-            let a = feed.buffer[idx & SpeakerFeed.mask], b = feed.buffer[(idx + 1) & SpeakerFeed.mask]
-            let y = SoftLimiter.process((a + (b - a) * f) * g)
-            spkL[i] = y; spkR[i] = y
-        }
-
-        // HD 震动：第 3/4 声道
-        if ctx.hapticsOn {
-            ctx.ampL += (ctx.targetL - ctx.ampL) * k
-            ctx.ampR += (ctx.targetR - ctx.ampR) * k
-            let sine = sinf(ctx.phase)
-            ctx.phase += inc
-            if ctx.phase > 2 * .pi { ctx.phase -= 2 * .pi }
-            var cL = sine, cR = sine
-            if let w = wave {
-                let wi = idx & HapticWaveform.mask
-                let wl = w.weight[0][wi], wr = w.weight[1][wi]
-                cL = wl * w.wave[0][wi] + (1 - wl) * sine
-                cR = wr * w.wave[1][wi] + (1 - wr) * sine
-            }
-            outL[i] = cL * ctx.ampL
-            outR[i] = cR * ctx.ampR
-        }
-        pos += step
-    }
-    if haveSource { ctx.cursor.readPos = pos }
+    for buf in abl.dropFirst(4) { if let p = buf.mData { memset(p, 0, Int(buf.mDataByteSize)) } }
+    renderer.render(speakerLeft: spkL, speakerRight: spkR, hapticLeft: outL, hapticRight: outR, frames: Int(frames))
     return noErr
 }

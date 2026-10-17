@@ -1,32 +1,32 @@
 import AppKit
-import Combine
+import ControllerCore
 import CoreAudio
 import Foundation
 import GameController
 
-/// 全局状态：开始 / 停止、100Hz 主循环、系统声音采集（只做一份，所有手柄共用）、权限提示、会话列表。
-/// 每个手柄自己的东西都在 `ControllerSession` 里。
+/// macOS 的真实引擎（实现 ControllerCore 的 `ControllerEngine`）：开始 / 停止、100Hz 主循环、
+/// 系统声音采集（只做一份，所有手柄共用）、权限提示、会话列表。每个手柄自己的东西都在 `ControllerSession` 里。
+/// 界面只通过 `ControllerEngine` 接口和它打交道：发命令、订阅状态快照 / 电平 / 事件。
 @MainActor
-final class AppModel: ObservableObject {
-    @Published private(set) var sessions: [ControllerSession] = []
-    @Published var selectedID: UUID?
-    @Published private(set) var running = false
-    @Published private(set) var errorMessage: Bilingual?
-    @Published private(set) var notice: Bilingual?
+final class AppModel: ControllerEngine {
+    let apiVersion = engineAPIVersion
+    private let broadcaster = EngineBroadcaster()
+
+    private var sessions: [ControllerSession] = []
+    /// 界面当前选中的手柄：只用作「新手柄复制谁的设置」（D5）
+    private var focusedID: ControllerID?
+    private var running = false { didSet { stateDirty() } }
+    private var errorMessage: Bilingual? { didSet { if errorMessage != oldValue { stateDirty() } } }
+    private var notice: Bilingual? { didSet { if notice != oldValue { stateDirty() } } }
+    private var options = GlobalOptions(
+        blockHomeButton: UserDefaults.standard.object(forKey: "blockHomeButton") as? Bool ?? true)
 
     /// 屏蔽 PS 键（系统「主页键」）打开 macOS「游戏」：让系统把主页键交给 App 处理。
     /// Apple 的 preferredSystemGestureState，按文档通常只在 App 位于前台时生效
-    @Published var blockHomeButton = UserDefaults.standard.object(forKey: "blockHomeButton") as? Bool ?? true {
-        didSet {
-            UserDefaults.standard.set(blockHomeButton, forKey: "blockHomeButton")
-            applyHomeButtonPolicy()
-        }
-    }
-
     func applyHomeButtonPolicy() {
         for c in GCController.controllers() {
             c.physicalInputProfile.buttons[GCInputButtonHome]?.preferredSystemGestureState =
-                blockHomeButton ? .disabled : .enabled
+                options.blockHomeButton ? .disabled : .enabled
         }
     }
 
@@ -44,23 +44,25 @@ final class AppModel: ObservableObject {
     private var timer: Timer?
     private var lastTick = Date()
     private var frame = 0
-    private var cancellables = Set<AnyCancellable>()
     private var saveWork: DispatchWorkItem?
+    /// 最近一次发出的状态快照
+    private var published = EngineState()
+    private var flushScheduled = false
 
-    var selected: ControllerSession? {
-        sessions.first { $0.id == selectedID } ?? sessions.first
+    private var focused: ControllerSession? {
+        sessions.first { $0.id == focusedID } ?? sessions.first
     }
 
     /// 至少有一个启用且 App 要控制点什么的手柄
-    var canStart: Bool { sessions.contains { $0.settings.enabled && !$0.allLeftToGame } }
+    private var canStart: Bool { sessions.contains { $0.settings.enabled && !$0.allLeftToGame } }
 
     init() {
         GCController.shouldMonitorBackgroundEvents = true
-        tuning = SpeakerTuning.load()
+        tuning = SpeakerTuning.load(from: UserDefaults.standard)
         speakerFeed = SpeakerFeed(highpassHz: tuning.highpassHz)
         let box = TimingBox()
         timingBox = box
-        registry = ControllerRegistry(store: SettingsStore(), waveform: waveform, feed: speakerFeed, tuning: tuning,
+        registry = ControllerRegistry(store: SettingsStore(defaults: UserDefaults.standard), waveform: waveform, feed: speakerFeed, tuning: tuning,
                                       tapTiming: { box.provider?() })
         box.provider = { [weak self] in
             MainActor.assumeIsolated { () -> DeviceTiming? in
@@ -75,7 +77,7 @@ final class AppModel: ObservableObject {
         registry.adjustNew = { settings in
             if args.contains("--massage") { settings.source = .massage }
         }
-        registry.selectedSettings = { [weak self] in self?.selected?.settings }
+        registry.selectedSettings = { [weak self] in self?.focused?.settings }
         registry.onChange = { [weak self] added, removed in
             self?.sessionsChanged(added: added, removed: removed)
         }
@@ -104,12 +106,6 @@ final class AppModel: ObservableObject {
         registry.refresh()
         applyHomeButtonPolicy()
 
-        // 调试用：--select <序号> 打开时选中第几个手柄（从 0 开始）
-        if let i = args.firstIndex(of: "--select"), i + 1 < args.count, let n = Int(args[i + 1]),
-           sessions.indices.contains(n) {
-            selectedID = sessions[n].id
-        }
-
         // 电量每 5 秒刷新一次（与是否在运行无关）；顺便再对一次连接情况，补上没有通知的 HID 插拔
         let housekeeping = Timer(timeInterval: 5, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
@@ -125,33 +121,92 @@ final class AppModel: ObservableObject {
         }
     }
 
+    // MARK: - ControllerEngine
+
+    var state: EngineState { makeState() }
+
+    var meters: [ControllerID: Meter] {
+        var m: [ControllerID: Meter] = [:]
+        for s in sessions where s.isActive { m[s.id] = Meter(left: s.level.0, right: s.level.1) }
+        return m
+    }
+
+    func subscribe(_ handler: @escaping @MainActor (EngineUpdate) -> Void) -> EngineSubscription {
+        let sub = broadcaster.subscribe(handler)
+        published = makeState()
+        handler(.state(published))
+        handler(.meters(meters))
+        return sub
+    }
+
+    func updateSettings(_ id: ControllerID, _ patch: SettingsPatch) {
+        guard let s = sessions.first(where: { $0.id == id }) else { return }
+        s.apply(patch)
+        flushState()   // 命令引起的变化立即发出，界面马上看到引擎接受后的值
+    }
+
+    func focus(_ id: ControllerID?) { focusedID = id }
+
+    func setGlobalOptions(_ patch: GlobalOptionsPatch) {
+        let new = patch.apply(to: options)
+        guard new != options else { return }
+        options = new
+        UserDefaults.standard.set(options.blockHomeButton, forKey: "blockHomeButton")
+        applyHomeButtonPolicy()
+        flushState()
+    }
+
+    // MARK: - 状态快照
+
+    private var capture: CaptureStatus {
+        if tap != nil { return .running }
+        if tapFailed, let errorMessage { return .failed(errorMessage) }
+        if tapStarting { return .waitingForConsent }
+        return .off
+    }
+
+    private func makeState() -> EngineState {
+        EngineState(running: running, canStart: canStart, capture: capture,
+                    controllers: sessions.map(\.info), notice: notice, error: errorMessage, options: options)
+    }
+
+    /// 内部变化：合并到下一拍再发（运行时由主循环约 33Hz 发，避免 L2/R2 调强度时每 10ms 重绘一次）
+    private func stateDirty() {
+        guard !flushScheduled else { return }
+        flushScheduled = true
+        if !running {
+            DispatchQueue.main.async { [weak self] in MainActor.assumeIsolated { self?.flushState() } }
+        }
+    }
+
+    private func flushState() {
+        flushScheduled = false
+        guard broadcaster.hasSubscribers else { return }
+        let s = makeState()
+        guard s != published else { return }
+        published = s
+        broadcaster.publish(.state(s))
+    }
+
     // MARK: - 会话列表
 
     private func sessionsChanged(added: [ControllerSession], removed: [ControllerSession]) {
         sessions = registry.sessions
-        if !sessions.contains(where: { $0.id == selectedID }) { selectedID = sessions.first?.id }
-        observeSessions()
+        for s in added {
+            s.onChange = { [weak self] in self?.stateDirty() }
+            s.onSettingsChange = { [weak self] in self?.settingsDidChange() }
+        }
         if running { added.forEach { $0.arm() } }
         if sessions.isEmpty && running { stop() }
         updateTap()
-    }
-
-    private func observeSessions() {
-        cancellables.removeAll()
-        for s in sessions {
-            // 会话里任何数值变化都让界面刷新
-            s.objectWillChange.sink { [weak self] _ in
-                MainActor.assumeIsolated { self?.objectWillChange.send() }
-            }.store(in: &cancellables)
-            // 设置变化：稍后保存、重新判断是否需要采集系统声音（willSet 时机，所以延后一拍再读）
-            s.$settings.dropFirst().sink { [weak self] _ in
-                DispatchQueue.main.async { MainActor.assumeIsolated { self?.settingsDidChange() } }
-            }.store(in: &cancellables)
-        }
+        stateDirty()
+        for s in removed { broadcaster.publish(.event(.controllerDisconnected(s.id))) }
+        for s in added { broadcaster.publish(.event(.controllerConnected(s.id))) }
     }
 
     private func settingsDidChange() {
         updateTap()
+        stateDirty()
         saveWork?.cancel()
         let work = DispatchWorkItem { [weak self] in
             MainActor.assumeIsolated { self?.registry.saveAll() }
@@ -162,14 +217,13 @@ final class AppModel: ObservableObject {
 
     // MARK: - 开始 / 停止
 
-    func toggle() { running ? stop() : start() }
-
     func start() {
         guard !running else { return }
         guard canStart else {
             errorMessage = sessions.isEmpty
                 ? Bilingual(zh: "没有找到手柄", en: "No controller found")
                 : Bilingual(zh: "没有启用的手柄", en: "No controller enabled")
+            flushState()
             return
         }
         errorMessage = nil
@@ -184,6 +238,7 @@ final class AppModel: ObservableObject {
         }
         RunLoop.main.add(tm, forMode: .common)
         timer = tm
+        flushState()
     }
 
     func stop() {
@@ -193,6 +248,8 @@ final class AppModel: ObservableObject {
         timer?.invalidate()
         timer = nil
         sessions.forEach { $0.disarm() }
+        flushState()
+        broadcaster.publish(.meters([:]))
     }
 
     // MARK: - 系统声音采集
@@ -208,6 +265,7 @@ final class AppModel: ObservableObject {
     }
 
     private func stopTap() {
+        defer { stateDirty() }
         tapGeneration += 1
         tapStarting = false
         tapFailed = false
@@ -222,6 +280,7 @@ final class AppModel: ObservableObject {
         analyzer.reset()
         tapGeneration += 1
         tapStarting = true
+        stateDirty()
         let generation = tapGeneration
         let t = SystemAudioTap()
         t.onAudio = { [analyzer, speakerFeed] l, r, n, sr in
@@ -245,7 +304,7 @@ final class AppModel: ObservableObject {
                 MainActor.assumeIsolated {
                     pending.cancel()
                     guard let self else { t.stop(); return }
-                    if self.tapGeneration == generation { self.tapStarting = false }
+                    if self.tapGeneration == generation { self.tapStarting = false; self.stateDirty() }
                     guard self.tapGeneration == generation, self.needsTap else {
                         t.stop()   // 等授权期间已经停止或不再需要
                         return
@@ -274,6 +333,11 @@ final class AppModel: ObservableObject {
         frame += 1
         let music = analyzer.current   // 一份分析结果，所有手柄共用
         for s in sessions { s.tick(music: music, dt: dt, count: frame) }
+        // 电平和状态约 33Hz 发给界面
+        if frame % 3 == 0 {
+            if flushScheduled { flushState() }
+            if broadcaster.hasSubscribers { broadcaster.publish(.meters(meters)) }
+        }
     }
 }
 

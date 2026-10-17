@@ -1,3 +1,4 @@
+import ControllerCore
 import GameController
 
 /// DualSense 的扳机阻尼、扳机读数、灯条（USB / 蓝牙都走 GameController）
