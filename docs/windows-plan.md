@@ -174,9 +174,17 @@ git checkout -b claude/p4-p5-windows
 
 swift build                    # 核心 + C 接口（macOS 目标在 Windows 上自动跳过）
 swift test                     # 145 个测试，应全部通过（W2 要确认的第一件事）
+native-win\scripts\build-swift.ps1   # release DLL + Swift 运行库 → native-win\out\x64
 cd android
-.\gradlew.bat :engine-api:test :engine-fake:test   # 纯 Kotlin 部分，不需要 Android SDK
+.\gradlew.bat -PdesktopOnly :engine-api:test :engine-fake:test   # 纯 Kotlin 部分；-PdesktopOnly 时不需要 Android SDK
 ```
+
+实测注意（Windows 11 + Swift 6.4.1）：
+- `swift` 必须在 VS x64 环境里跑（缺 `link.exe` 会报 toolchain is invalid）；`build-swift.ps1` 自己导入 vcvars。
+- 装完 Swift / JDK 后**新开终端**：旧终端里没有 `SDKROOT`（报 unable to load standard library）和 `JAVA_HOME`。
+- 没开「开发者模式」时 SwiftPM 建不了 `.build\release` 符号链接（只是警告）；产物实际在 `.build\out\Products\Release-windows-x86_64\`。
+- 6.4.1 编译时有一堆 `wchar_t ... broken by a context change` 警告，来自工具链自带的 WinSDK 模块，不是项目代码，可忽略。
+- Release 版 `ControllerCAPI.dll` 导出全部 36 个 `cv_*`（与 `controller_core.h` 一致），不需要额外导出设置；连同运行库共 19 个 DLL、约 58MB（运行库目录自带 `VCRUNTIME140` / `MSVCP140`，一起拷了）。
 
 ## 4. 开发步骤
 
@@ -300,14 +308,19 @@ JRE（jlink 精简）约 50–70MB + Swift 运行库约 60MB（其中 ICU 约 30
 
 ## 7. 实测记录（W1 起在这里补）
 
+实测环境：Windows 11 Pro 26200，DualSense（PID 0x0CE6）USB 连接，探测程序 `native-win/probe/`（`probe list|hid|hd|speaker [振幅]`）。
+
 | 项目 | 结果 |
 |---|---|
-| DualSense 音频端点混音格式 | 待测 |
-| HID 与音频端点 ContainerId 是否一致 | 待测 |
-| USB 共享模式第 3/4 声道能否驱动 HD | 待测 |
-| USB 输入报告速率 | 待测 |
-| 蓝牙 0x31 发送速率 | 待测 |
-| 环回采集延迟（周期 / 缓冲） | 待测 |
+| DualSense 音频端点混音格式 | 共享模式 **4 声道、48kHz、32 位 float，`dwChannelMask=0x33`**（FL/FR/BL/BR），名字 `Speakers (DualSense Wireless Controller)`，与 macOS 布局相同 |
+| HID 与音频端点 ContainerId 是否一致 | **一致**（HID 用 `CM_Get_DevNode_PropertyW(DEVPKEY_Device_ContainerId)`，端点用属性库里的同一个键）。HID 接口是 `mi_03`，报告长度 in=64 / out=48 |
+| USB 共享模式第 3/4 声道能否驱动 HD | **能**。先发 flag0 bit0–1 和字节 38 清零的 0x02 报告，再往第 3/4 声道写 80Hz 正弦，手感正常 |
+| HID 0x02 输出 | `WriteFile`（重叠 I/O）28/28 成功；灯条、兼容震动、恢复默认都正常 |
+| USB 输入报告速率 | **250 个/秒**；L2/R2（字节 5/6）读数正常 |
+| 扬声器 | **能**（路径 3、音量 0x64、前置放大 2，第 1/2 声道 1kHz）。**注意**：这台机器上 DualSense 端点的 Windows 音量是 0%（-100dB），扬声器几乎无声；音量调到 100% 后正常。HD 在 0% 时照样正常 → 端点音量只作用于扬声器声道，不影响触觉声道。**待定**：引擎开扬声器时是否自动把端点音量调到 100%（停止时恢复），还是界面提示用户 |
+| 蓝牙 0x31 发送速率 | 待测（需要蓝牙连接） |
+| 环回采集延迟（周期 / 缓冲） | 待测（W5） |
+| 冲突软件 | 机器上装了 Steam（有 Steam Streaming 虚拟声卡）；Steam 未运行时 HID 读写正常 |
 
 ## 8. 在 Windows 机器上让 Claude 做的话
 

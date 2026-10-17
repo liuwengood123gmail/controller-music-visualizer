@@ -16,4 +16,7 @@ dependencyResolutionManagement {
 rootProject.name = "ControllerMusicVisualizer"
 
 // 依赖方向（docs/cross-platform-design.md §7.1）：ui 只依赖 engine-api；engine / engine-fake 实现 engine-api；app 组装
-include(":engine-api", ":engine-fake", ":engine", ":ui", ":app")
+// -PdesktopOnly：不配置 Android 模块，没装 Android SDK 的 Windows 机器也能编（docs/windows-plan.md W3）
+val desktopOnly = providers.gradleProperty("desktopOnly").isPresent
+include(":engine-api", ":engine-fake")
+if (!desktopOnly) include(":engine", ":ui", ":app")

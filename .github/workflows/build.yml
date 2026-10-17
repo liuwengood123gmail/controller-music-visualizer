@@ -31,6 +31,30 @@ jobs:
       - name: Test ControllerCore
         run: swift test
 
+  # Windows：Swift 核心在 Windows 上编译、测试，出 ControllerCAPI.dll + Swift 运行库（docs/windows-plan.md W2）
+  windows:
+    runs-on: windows-latest
+    env:
+      SWIFT_VERSION: 6.3.3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - uses: compnerd/gha-setup-swift@main
+        with:
+          branch: swift-${{ env.SWIFT_VERSION }}-release
+          tag: ${{ env.SWIFT_VERSION }}-RELEASE
+      - name: Test Swift core
+        run: swift test
+      - name: Build ControllerCAPI.dll and collect runtime
+        shell: pwsh
+        run: native-win/scripts/build-swift.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ControllerCAPI-windows-x64
+          path: native-win/out/x64
+
   # Android：Swift 核心交叉编译成 .so → Kotlin 单测（契约 / 假引擎）→ 打 APK → x86_64 模拟器上跑 JNI 测试和启动冒烟
   android:
     runs-on: ubuntu-latest
