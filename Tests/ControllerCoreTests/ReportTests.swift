@@ -1,5 +1,5 @@
 import XCTest
-@testable import ControllerMusicVisualizer
+@testable import ControllerCore
 
 final class ReportTests: XCTestCase {
     func testCRC32KnownValue() {

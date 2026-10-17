@@ -1,7 +1,7 @@
 import Foundation
 
 /// 内置按摩效果：输入时间（已乘速度），输出左右强度 0...1、灯条颜色、HD 载波频率范围
-enum MassagePreset: String, Codable, CaseIterable, Identifiable {
+public enum MassagePreset: String, Codable, CaseIterable, Identifiable, Sendable {
     case knead = "揉捏"
     case tap = "敲击"
     case pat = "拍打"
@@ -16,9 +16,9 @@ enum MassagePreset: String, Codable, CaseIterable, Identifiable {
     case breathe = "呼吸"
     case raindrop = "雨滴"
     case random = "随机"
-    var id: Self { self }
+    public var id: Self { self }
 
-    var title: String {
+    public var title: String {
         switch self {
         case .knead: L("揉捏", "Knead")
         case .tap: L("敲击", "Tap")
@@ -37,7 +37,7 @@ enum MassagePreset: String, Codable, CaseIterable, Identifiable {
         }
     }
 
-    var icon: String {
+    public var icon: String {
         switch self {
         case .knead: "hand.raised"
         case .tap: "hand.point.up"
@@ -59,7 +59,7 @@ enum MassagePreset: String, Codable, CaseIterable, Identifiable {
     // MARK: - 对外接口（随机会委托给当前轮播到的预设）
 
     /// 左右强度 0...1
-    func sample(_ t: Double) -> (left: Float, right: Float) {
+    public func sample(_ t: Double) -> (left: Float, right: Float) {
         guard self == .random else { return baseSample(t) }
         let (a, b, w) = Self.playlist(t)
         let x = a.baseSample(t), y = b.baseSample(t)
@@ -67,7 +67,7 @@ enum MassagePreset: String, Codable, CaseIterable, Identifiable {
     }
 
     /// 灯条颜色（色相 0...1）
-    func hue(_ t: Double) -> Float {
+    public func hue(_ t: Double) -> Float {
         guard self == .random else { return baseHue(t) }
         let (a, b, w) = Self.playlist(t)
         var ha = a.baseHue(t), hb = b.baseHue(t)
@@ -77,7 +77,7 @@ enum MassagePreset: String, Codable, CaseIterable, Identifiable {
     }
 
     /// HD 载波频率范围（Hz）：震动弱时用 high（细腻），强时降到 low（有劲）
-    func carrierRange(_ t: Double) -> (low: Float, high: Float) {
+    public func carrierRange(_ t: Double) -> (low: Float, high: Float) {
         guard self == .random else { return baseCarrierRange }
         let (a, b, w) = Self.playlist(t)
         let x = a.baseCarrierRange, y = b.baseCarrierRange
@@ -85,7 +85,7 @@ enum MassagePreset: String, Codable, CaseIterable, Identifiable {
     }
 
     /// 随机模式当前正在播放的预设（其他预设返回自身）
-    func current(_ t: Double) -> MassagePreset {
+    public func current(_ t: Double) -> MassagePreset {
         guard self == .random else { return self }
         let (a, b, w) = Self.playlist(t)
         return w < 0.5 ? a : b

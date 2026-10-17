@@ -59,18 +59,3 @@ final class ControllerFeatures {
         lastResistance = -1
     }
 }
-
-/// HSV → RGB，h/s/v 都是 0...1
-func hsv(_ h: Float, _ s: Float, _ v: Float) -> (Float, Float, Float) {
-    let h6 = (h - floorf(h)) * 6
-    let i = Int(h6) % 6, f = h6 - floorf(h6)
-    let p = v * (1 - s), q = v * (1 - s * f), t = v * (1 - s * (1 - f))
-    switch i {
-    case 0: return (v, t, p)
-    case 1: return (q, v, p)
-    case 2: return (p, v, t)
-    case 3: return (p, q, v)
-    case 4: return (t, p, v)
-    default: return (v, p, q)
-    }
-}

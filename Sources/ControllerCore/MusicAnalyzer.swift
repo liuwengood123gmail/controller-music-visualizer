@@ -1,13 +1,12 @@
 import Foundation
-import os
 
-enum MusicMode: String, Codable, CaseIterable, Identifiable {
+public enum MusicMode: String, Codable, CaseIterable, Identifiable, Sendable {
     case beat = "节拍"
     case bass = "低音"
     case envelope = "包络"
-    var id: Self { self }
+    public var id: Self { self }
 
-    var title: String {
+    public var title: String {
         switch self {
         case .beat: L("节拍", "Beat")
         case .bass: L("低音", "Bass")
@@ -17,7 +16,7 @@ enum MusicMode: String, Codable, CaseIterable, Identifiable {
 
     /// HD 载波频率范围（Hz）：震动弱时用 high（细腻），强时降到 low。
     /// 实测马达在 50–65Hz 最有劲（比兼容震动最大值还强），低于 50Hz 反而变弱，所以 low 不低于 50
-    var carrierRange: (low: Float, high: Float) {
+    public var carrierRange: (low: Float, high: Float) {
         switch self {
         case .beat: (55, 120)
         case .bass: (50, 90)
@@ -28,30 +27,30 @@ enum MusicMode: String, Codable, CaseIterable, Identifiable {
 
 /// 分析结果：只含与具体手柄无关的原始特征。每个手柄的会话再按自己的设置
 ///（模式、响应速度、鼓点灵敏度、灯条速度…）整形成震动和灯光，见 Shaping.swift
-struct MusicFrame {
+public struct MusicFrame: Sendable {
     /// 低音能量（自动增益后 0...1，左右）
-    var bass: (Float, Float) = (0, 0)
+    public var bass: (Float, Float) = (0, 0)
     /// 低音的相对强度（左右）：按分贝记住近 2 秒的最小、最大音量，把当前音量映射到两者之间，0...1，未平滑
-    var bassRelative: (Float, Float) = (0, 0)
+    public var bassRelative: (Float, Float) = (0, 0)
     /// 全频的相对强度（左右），0...1，未平滑
-    var fullRelative: (Float, Float) = (0, 0)
+    public var fullRelative: (Float, Float) = (0, 0)
     /// 灯光亮度（左右），0...1：低音能量减去近期「暗部底线」后放大，鼓点间会明显变暗
-    var light: (Float, Float) = (0, 0)
+    public var light: (Float, Float) = (0, 0)
     /// 白点电平（左右），0...1：当前音量在近 2 秒最小～最大音量之间的相对位置（分贝），近似实时
-    var meter: (Float, Float) = (0, 0)
+    public var meter: (Float, Float) = (0, 0)
     /// 灯条颜色（未锁定）：低频 → 红、中频 → 绿、高频 → 蓝，三路各自按能量混合，0...1
-    var color: (r: Float, g: Float, b: Float) = (0, 0, 0)
+    public var color: (r: Float, g: Float, b: Float) = (0, 0, 0)
 }
 
 /// 相对强度：按分贝记住近 2 秒的最小、最大音量，把当前音量映射到两者之间（0...1）。
 /// 本身很响、被压得很平的歌也能表现出起伏；两端至少相差 6dB，避免微小波动被放大成乱跳
-struct RelativeLevel {
+public struct RelativeLevel {
     private var db: Float = -80
     private var lo: Float = -60
     private var hi: Float = -20
 
     /// rise / fall：分贝值的跟随时间常数（秒）
-    mutating func update(rms: Float, dt: Float, rise: Float = 0.003, fall: Float = 0.06) -> Float {
+    public mutating func update(rms: Float, dt: Float, rise: Float = 0.003, fall: Float = 0.06) -> Float {
         let target = 20 * log10f(rms + 1e-5)
         db += (target - db) * (1 - expf(-dt / (target > db ? rise : fall)))
         let relax = 1 - expf(-dt / 2)
@@ -63,12 +62,12 @@ struct RelativeLevel {
 }
 
 /// 把左右声道的音频变成震动和灯光的原始特征。只有一份，所有手柄共用（在音频线程运行）
-final class MusicAnalyzer {
+public final class MusicAnalyzer {
     /// HD 震动用的音乐低频波形；设置后每块音频都会写进去
-    var waveform: HapticWaveform?
+    public var waveform: HapticWaveform?
 
-    private let output = OSAllocatedUnfairLock(initialState: MusicFrame())
-    var current: MusicFrame { output.withLock { $0 } }
+    private let output = LockedBox(MusicFrame())
+    public var current: MusicFrame { output.withLock { $0 } }
 
     // 分析状态（只在音频线程访问）
     private var lp1: [Float] = [0, 0], lp2: [Float] = [0, 0]
@@ -84,7 +83,7 @@ final class MusicAnalyzer {
     private var colorFloor: [Float] = [0, 0, 0]
     private var colorOut: [Float] = [0, 0, 0]
 
-    func reset() {
+    public func reset() {
         lp1 = [0, 0]; lp2 = [0, 0]
         bassPeak = [1e-3, 1e-3]
         lightSmooth = [0, 0]; lightFloor = [0, 0]
@@ -99,7 +98,7 @@ final class MusicAnalyzer {
         return current + (target - current) * (1 - expf(-dt / t))
     }
 
-    func process(left: UnsafePointer<Float>, right: UnsafePointer<Float>, frames: Int, sampleRate: Float) {
+    public func process(left: UnsafePointer<Float>, right: UnsafePointer<Float>, frames: Int, sampleRate: Float) {
         guard frames > 0 else { return }
         let dt = Float(frames) / sampleRate
         let a = 1 - expf(-2 * .pi * 150 / sampleRate)   // 150Hz 二阶低通
