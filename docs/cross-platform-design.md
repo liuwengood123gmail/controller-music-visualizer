@@ -24,6 +24,12 @@
    - **macOS 先行**：它已有一套能用的底层，最适合检验接口是否够用。接口在 macOS 上跑通、回归通过后再交给 Android，返工最少。
    - **界面先于底层**：界面只依赖接口和假引擎，不需要手柄。界面按引擎给出的能力显示 / 隐藏设置项，所以底层的实物探测结果不会阻塞界面开发。
 
+> 💬 **审核意见（Claude，2026-10-16）**：仓库作者希望**先做 P1、P2，再做 P3、P4**。但 P1（macOS 按接口改造）依赖 P0 的核心抽取和 Swift 版接口，P2（Android 界面）依赖 P0 的 Kotlin `engine-api`。建议把 P0 拆成两半：
+> - **P0a（P1 之前做）**：纯逻辑移到 `ControllerCore`、抽 `SessionEngine` / `DualSenseOutputController` / `ControllerAudioRenderer` / `SessionReconciler`、Swift 版 `ControllerEngine` 协议、Linux CI。
+> - **P0b（P2 开头做）**：Kotlin `engine-api`、契约样例 JSON、Android `.so` 交叉编译 CI。
+>
+> 这样实际顺序是 **P0a → P1 →（P0b → P2）→ P3 → P4**，P1 和 P0b / P2 可以在接口定稿后并行。各阶段代码量估算见文末 §12。
+
 ## 1. 现有代码盘点：哪些能复用
 
 `Sources/ControllerMusicVisualizer/` 的 19 个文件按「依赖了什么」分三类（行数为当前 master）：
@@ -47,6 +53,8 @@
 | | `AppModel.swift` | 283 | AppKit、Combine、CoreAudio、GameController | 主循环、采集启停规则、防抖保存可以抽一部分；其余是 macOS 外壳 |
 | **只属于 macOS** | `App.swift`（SwiftUI）、`SystemAudioTap.swift`、`CoreAudioUtils.swift`、`ControllerFeatures.swift`、`HapticEngines.swift` | ~700 | SwiftUI / CoreAudio / GameController / CoreHaptics | 各平台重写对应部分 |
 
+> 💬 **审核意见（Claude，2026-10-16）**：已核对：19 个文件、各文件行数、`~700` 行 macOS 专属（306+98+130+76+86=696）都与当前 master 一致；「6 组单元测试」= 6 个测试文件、共 **79** 个测试。遗漏一处：`UserDefaults` 还用在 `AppModel.swift`（屏蔽 PS 键开关）和 `App.swift`（`@AppStorage` 语言），P0a / P1 也要接到 `KeyValueStore`。
+
 所以「尽量复用」实际能复用的是：**全部纯逻辑 + 抽出后的会话引擎 / HID 状态机 / 音频渲染器 / 注册表对账**，约占非界面代码（~3,000 行）的 60–65%。每个平台要新写的是：系统声音采集、设备发现、HID 收发、4 声道音频设备、其他手柄的震动、界面。
 
 ## 2. 技术路线选择
@@ -61,6 +69,8 @@
 方案 A 的依据：
 - Swift 6.3 带来了**第一个官方 Android SDK**，可以把现有 Swift 包编译到 Android，并通过 swift-java / Swift Java JNI Core 让 Kotlin / Java 调用 Swift 代码；**SwiftUI 不在 Android 上** [已证实，[9to5Google](https://9to5google.com/2026/03/28/swift-a-coding-language-developed-by-apple-now-offers-official-android-support/)、[i-programmer](https://www.i-programmer.info/news/98-languages/18766-swift-63-adds-android-sdk.html)；最低 API 级别 28 只见于二手文章 [待核实]]。
 - Windows 上没有 Swift 写的界面框架。The Browser Company 做了 [swift-winrt](https://speakinginswift.substack.com/p/swift-meet-winrt) / [swift-winui](https://github.com/thebrowsercompany/swift-winui)，但 swift-winui「目前只支持 x64」、「并非所有 API 都能生成」，最后更新在 2025 年 3 月；另有社区的纯 Swift 重写 [tristanlabelle/swift-winrt](https://github.com/tristanlabelle/swift-winrt) [已证实]。所以 Windows 界面**建议用 C#（WinUI 3 或 WPF）写薄外壳**，Swift 核心编译成 DLL、导出 C 接口；swift-winui 作为备选（全 Swift，但有架构和成熟度风险）。
+
+> 💬 **审核意见（Claude，2026-10-16）**：建议把 **Compose Multiplatform（Desktop / JVM）** 列为 Windows 界面的候选，并在 P2 结束时评估：P2 写的 Compose 界面（以及 Kotlin `engine-api`、假引擎）大部分可以直接用在 Windows 上，P4 的工作量可能降到 C# 方案的 1/3 以下，而且只维护一份界面。代价：需要打包 JVM（jlink 精简后约 50–90MB [推测]）、托盘和窗口行为要单独调；Swift DLL 改由 JNA / Java FFM（Panama）调用，而不是 C# P/Invoke。C 接口 + JSON 的设计两种方案都适用，不影响 P0a。
 
 ## 3. 平台能力调研
 
@@ -80,7 +90,9 @@
 | 手柄扬声器 | ✓ 4 声道音频 | ✓ 4 声道音频 | ? 0x36 Opus，速率待测 | ? C 档 + 打开通路的 HID 报告（B 档，或低版本抢占 USB 接口） | ? 只有 B 档 + 0x36 |
 | 其他手柄（8BitDo 等）震动 | ✓ GameController | ✓ SDL3 或 Windows.Gaming.Input | ✓ 同左 | ✓ A 档 `VibratorManager` | ✓ |
 | 后台运行 | ✓ | ✓ | ✓ | ◐ 前台服务（通知栏常驻） | ◐ 同左 |
-| 屏蔽 PS 键打开系统界面 | ✓（macOS「游戏」） | 不需要（Windows 没有对应行为；Steam 大屏幕模式可能会被唤起 [推测]） | 同左 | 不需要 | 不需要 |
+| 屏蔽 PS 键打开系统界面 | ◐（App 在前台时；全局需在系统设置关闭「Enable Home Button Actions」） | 不需要（Windows 没有对应行为；Steam 大屏幕模式可能会被唤起 [推测]） | 同左 | 不需要 | 不需要 |
+
+> 💬 **审核意见（Claude，2026-10-16）**：已把 macOS 一格从 ✓ 改为 ◐：本机实测 `preferredSystemGestureState` 只在 App 位于前台时生效，后台仍会打开「游戏」（README 已更正）。
 
 ### 3.2 Windows
 
@@ -105,6 +117,12 @@
 - 一篇报道说「Windows 根本处理不了手柄高级功能所需的 4 声道音频带宽」[[clubic](https://www.clubic.com/actualite-611413-la-dualsense-retrouve-ses-haptiques-sur-pc-grace-a-un-raspberry-pi-pico-2w-a-10.html)]，这说的是 Windows 没有原生的蓝牙手柄音频，与 HID 报告的吞吐量是两回事。
 - → **Windows 蓝牙 HD 很可能可行，蓝牙扬声器（0x36 + Opus，37 KB/s）待测。** 把 `docs/research/bt-send-rate-probe.swift` 的逻辑改写成 Windows 版测一次就知道（§9 第 3 条）。
 
+> 💬 **审核意见（Claude，2026-10-16）**：Windows 蓝牙的证据比这里写的更强，建议补充并把「蓝牙扬声器：待测」升级为「已有现成实现，仍需本机实测」：
+> - [DualSenseClient/DualSenseClient](https://github.com/DualSenseClient/DualSenseClient)（Windows / Linux，GPL-3.0）README 写明「DualSense (Bluetooth) ✅ Full support including speaker and haptics audio」「Opus-encoded haptics over Bluetooth」。
+> - [MaximumFreak/dualsense-studio（DSZ）](https://github.com/MaximumFreak/dualsense-studio)（Windows 10/11）支持「Bluetooth haptics and speaker audio」，并实测蓝牙下约 **670 个输入报告 / 秒**（本机 macOS 只有 ~65 / 秒，见 bluetooth-audio-findings §6.5）→ 说明 Windows 的蓝牙链路**没有** macOS 那样的 ~15ms 节拍限制。
+> - 注意许可证：DualSenseClient 是 GPL-3.0，本仓库没有许可证；**只能参考协议细节，不能复制代码**。
+> - 另：§9 第 4 条写的是「§9 第 3 条」，编号对不上，应为第 4 条。
+
 **其他手柄。** 8BitDo（Switch Pro 模式）、Xbox、DualShock 4：用 **SDL3** 的游戏手柄 API 做震动（跨平台，C 库，Swift 可直接调用）。但要通过提示关掉 SDL 自己的 PS5 驱动（`SDL_HINT_JOYSTICK_HIDAPI_PS5`），避免它和我们同时打开 DualSense [推测]。Xbox 手柄也可以走 `Windows.Gaming.Input`；本次调研没有找到 DualSense 在 `Windows.Gaming.Input` 下的震动支持资料。
 
 ### 3.3 Android
@@ -122,6 +140,8 @@
   - 对 DualSense，底层是 Linux 内核的 `hid-playstation` 驱动，它支持灯条、玩家灯、兼容震动、电池、陀螺仪、触控板，**不支持自适应扳机和高级触觉** [已证实，[XDA](https://www.xda-developers.com/android-ps5-controller-support-getting-better/)、内核提交记录]。
   - 结论：A 档覆盖「跟随音乐 / 按摩的兼容震动 + 灯条 + 玩家灯（白点电平）」，USB 和蓝牙都能用，**不需要特殊权限**。是 Android 版的基础档。
   - 注意：`VibratorManager` 的振动是一次性效果（`createOneShot(duration, amplitude)`），要做 100Hz 的连续强度更新，需要验证频繁调用的延迟和是否会卡顿 [待实测]；振幅是 1–255 的整数。
+
+> 💬 **审核意见（Claude，2026-10-16）**：每 10ms 调一次 `createOneShot` 很可能会让效果反复「重启」，产生断续感或额外延迟。建议设计里直接写上备选方案：用 `VibrationEffect.createWaveform(timings, amplitudes, repeat)` 预排一小段波形、以 20–50Hz 更新；先检查 `Vibrator.hasAmplitudeControl()`（不支持振幅时只能开 / 关）；A 档的更新频率做成可调参数。DualSense 经 `hid-playstation` 走的是兼容震动，本身就不需要 100Hz 精度。
 - **B 档：`HidManager` / `HidDevice`（Android 17 / API 37）。**
   - Android 17 把「App 直接访问原始 HID 数据流」放在**危险级权限 `ACCESS_HID`** 之后 [已证实，[Android 17 企业版新功能](https://developer.android.com/work/versions/android-17)]。`HidManager` 枚举设备需要该权限，通常由**系统选择器或权限对话框**授予对具体设备的访问；`HidDevice` 提供 `sendOutputReport`（异步回调）、`getFeatureReport` 等；打开失败可能是底层节点（例如 hidraw）无法访问（`IOException`）或用户拒绝（`SecurityException`）；**App 在后台或缓存状态时访问可能受限** [已证实，[HidManager](https://developer.android.com/reference/android/hardware/hid/HidManager)、[HidDevice](https://developer.android.com/reference/android/hardware/hid/HidDevice)]。
   - 意义：**DualSense 的全部 HID 功能（扳机阻尼、灯条、白灯、兼容震动）直接复用 `DualSenseReport` 和抽出来的 `DualSenseOutputController`**，USB 发 0x02，蓝牙发 0x31。
@@ -236,6 +256,8 @@ data class ControllerInfo(
 
 几个关键约定：
 - **设置用补丁**：L2/R2 会在引擎里实时改 `intensity`，如果界面每次发整份设置，会把引擎刚改的强度覆盖回旧值。所以界面只发「我改了哪几个字段」，引擎合并后再从 `state` 推回来。
+
+> 💬 **审核意见（Claude，2026-10-16）**：补丁还需要写清**同一字段的冲突规则**：用户正在拖强度滑块时，L2/R2 也在改强度。建议：引擎按「每个字段最后一次写入为准」；界面在拖动期间显示本地值、不被 `state` 回推覆盖，松手后再以引擎的值为准。另外 `GlobalOptionsPatch` 建议列出字段：屏蔽 PS 键、扬声器可调参数（`SpeakerTuning`，目前是全局的 UserDefaults 键）。
 - **两种频率分开**：`state` 只在变化时发（设置、插拔、电量、状态），`meters` 单独以约 30Hz 发。电平条只订阅 `meters`，其他界面不会因此每秒重绘几十次。现在 macOS 版的整个窗口会随电平 100Hz 重绘，这里顺便改掉。
 - **显示文字由引擎给双语**（沿用 `Bilingual`）：引擎产生的状态 / 错误文字带中英两份，界面按当前语言取。界面自己的文案仍由界面本地化。
 - **线程**：命令可以在任意线程调用，引擎内部串行处理；`state` / `meters` 在界面线程收集。引擎的实时线程（采集、音频渲染）永远不等界面。
@@ -441,6 +463,8 @@ android/
 |---|---|---|---|
 | **P0 抽核心 + 定接口** | ① **移动**纯逻辑文件到 `ControllerCore`，锁 / 原子计数改造；② 抽 `SessionEngine`、`DualSenseOutputController`、`ControllerAudioRenderer`、`SessionReconciler`，补单元测试；③ 定 §4.2 的接口：Swift 协议 + Kotlin `engine-api`（先只写接口和数据类）+ 契约样例 JSON；④ CI：Linux 构建 + 测试核心，交叉编译 Android `.so` | 核心在 macOS / Linux CI 上测试全绿、能编出 Android `.so`；接口评审通过（定稿 `apiVersion = 1`）；macOS App 此时仍用旧代码，行为不变 | 无 |
 | **P1 macOS 按接口改造** | **底层**：`AppModel` / `ControllerSession` 改为基于 `SessionEngine` 等核心组件，实现 Swift 版 `ControllerEngine`。**界面**：SwiftUI 只绑定接口给出的快照 / 电平流 / 事件，改设置走补丁命令；附 Swift 版假引擎供 SwiftUI 预览。先写「新旧实现逐 tick 输出相同」的对照测试，再删旧代码 | **回归测试通过**：多手柄文档 §11、扬声器文档 §8 的清单逐条确认；界面在假引擎下也能完整操作。**接口如需调整，在这一阶段改完** | Mac + DualSense（USB / 蓝牙）+ 8BitDo |
+
+> 💬 **审核意见（Claude，2026-10-16）**：P1 验收建议再加三项：① CPU 占用改造前后对比（`top -pid`，运行中、跟随音乐 + HD + 扬声器）；② 界面重绘频率（电平改为约 30Hz 后，整窗不再 100Hz 重绘）；③ 扬声器默认参数（128 帧缓冲、音量归一化、前置放大 +6dB）与延迟显示和改造前一致。
 | **P2 Android 界面** | Gradle 工程骨架（§7.1 的模块）；`engine-api` 的 Kotlin 实现补全；Compose 界面（手机 / 平板自适应、双语）；Kotlin 版假引擎（剧本 + 模拟电平）；权限 / 授权流程的界面部分（MediaProjection 弹窗、USB / HID 授权提示） | 在假引擎的各个剧本下界面完整可用（无手柄、多手柄、蓝牙 / USB、授权被拒、运行中拔出）；截图测试 | Android 手机 / 平板（不需要手柄） |
 | **P3 Android 底层** | ① 先做两个实物探测（§9 第 1、2 条）；② A 档：前台服务、播放采集、Swift 核心经 JNI、`VibratorManager` / `LightsManager`、调试入口；③ C 档：USB 4 声道 HD + 扬声器；④ B 档：Android 17 `HidManager`（扳机阻尼、精确灯光、后台 L2/R2、蓝牙速率实测）。每一档做完就把 `app` 从假引擎切到真引擎验收 | A 档：DualSense（USB / 蓝牙）和 8BitDo 跟随音乐 / 按摩震动、灯条跟随；C 档：Android 10+ USB HD / 扬声器（若 4 声道可行）；B 档：Android 17 扳机阻尼。界面不需要为底层改动 | Android 12+ 设备、Android 17 设备、DualSense、8BitDo、USB-C 线 |
 | **P4 Windows 界面** | C#（WinUI 3 或 WPF）外壳 + 托盘；C# 版假引擎；对接 C 接口的绑定层 | 假引擎下界面完整可用 | Windows PC（不需要手柄） |
@@ -471,3 +495,20 @@ android/
 - Swift：[Swift 6.3 / Android SDK（9to5Google）](https://9to5google.com/2026/03/28/swift-a-coding-language-developed-by-apple-now-offers-official-android-support/)、[i-programmer](https://www.i-programmer.info/news/98-languages/18766-swift-63-adds-android-sdk.html)、[Swift, meet WinRT](https://speakinginswift.substack.com/p/swift-meet-winrt)、[swift-winui](https://github.com/thebrowsercompany/swift-winui)、[tristanlabelle/swift-winrt](https://github.com/tristanlabelle/swift-winrt)、[Synchronization.Mutex 的平台限制](https://forums.swift.org/t/sychronization-mutex-t-in-standard-library-but-restricted-to-ios-18/74803)。
 - Windows：[进程环回参数](https://learn.microsoft.com/en-us/windows/win32/api/audioclientactivationparams/ns-audioclientactivationparams-audioclient_process_loopback_params)、[ActivateAudioInterfaceAsync](https://learn.microsoft.com/en-us/windows/desktop/api/mmdeviceapi/nf-mmdeviceapi-activateaudiointerfaceasync)、[Application Loopback 示例](https://learn.microsoft.com/en-us/samples/microsoft/windows-classic-samples/applicationloopbackaudio-sample/)、[HidD_SetOutputReport](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/hidsdi/nf-hidsdi-hidd_setoutputreport)、[Steam 讨论：DualSense 4 声道](https://steamcommunity.com/app/2420110/discussions/0/4292566446032401450)、[Wine MR 337](https://gitlab.winehq.org/wine/wine/-/merge_requests/337)、[SDL3 PS5 震动提示](https://wiki.libsdl.org/SDL3/SDL_HINT_JOYSTICK_HIDAPI_PS5_RUMBLE)、[clubic 报道](https://www.clubic.com/actualite-611413-la-dualsense-retrouve-ses-haptiques-sur-pc-grace-a-un-raspberry-pi-pico-2w-a-10.html)、[awalol/dualsense-bt-haptics](https://github.com/awalol/dualsense-bt-haptics)。
 - Android：[播放采集](https://developer.android.com/media/platform/av-capture)、[AudioPlaybackCaptureConfiguration](https://d.android.com/reference/android/media/AudioPlaybackCaptureConfiguration)、[Media projection](https://developer.android.com/media/grow/media-projection)、[Controller features](https://developer.android.com/develop/ui/views/touch-and-input/game-controllers/controller-features?hl=en)、[Light](https://developer.android.com/reference/android/hardware/lights/Light)、[HidManager](https://developer.android.com/reference/android/hardware/hid/HidManager)、[HidDevice](https://developer.android.com/reference/android/hardware/hid/HidDevice)、[Android 17 企业版新功能（ACCESS_HID）](https://developer.android.com/work/versions/android-17)、[AAudio](https://developer.android.com/ndk/reference/a_audio_8h)、[AOSP 多声道 USB 修复](https://gitlab.e.foundation/e/os/android_frameworks_av/-/commit/16c66dd1e60d6b65b846f371c2ae4bf2b673545f)、[XDA：Android 上的 PS5 手柄支持](https://www.xda-developers.com/android-ps5-controller-support-getting-better/)。
+
+## 12. 代码量估算（审核补充，Claude 2026-10-16）
+
+> 基准：当前 macOS 版 19 个源文件共 **3,323 行**，测试 950 行（79 个）。以下是**新增或改动**的行数粗估（含测试），按 §0 审核意见里的顺序；不同实现者差别可能有 ±30%。
+
+| 阶段 | 主要内容 | 新增 / 改动（约） | 其中测试 | 说明 |
+|---|---|---|---|---|
+| **P0a** 抽核心 + Swift 接口 | 纯逻辑**移动**到 `ControllerCore`（~1,250 行，只改 import / `public`）；新写 `SessionEngine`、`DualSenseOutputController`、`ControllerAudioRenderer`、`SessionReconciler`、`LockedBox` / 原子计数、平台协议、Swift 版 `ControllerEngine` 协议；Linux CI | **1,300–1,700**（另有 ~1,250 行搬移） | 500–700 | 风险最高的是把 `ControllerSession.tick()` 和音频渲染回调拆成纯函数而行为不变 |
+| **P1** macOS 按接口改造 | `AppModel` / `ControllerSession` 改为实现协议；SwiftUI（`App.swift` 306 行）改绑快照 / 电平流 / 事件、补丁命令；Swift 假引擎；新旧逐 tick 对照测试；删除旧代码 | **1,000–1,400**（删除 ~600） | 300–400 | 需要 Mac + DualSense（USB / 蓝牙）+ 8BitDo 回归 |
+| **P0b** Kotlin 接口 + 契约 | `engine-api`（接口、数据类、补丁类型）、契约样例 JSON、Swift / Kotlin 两边的契约测试、Android `.so` 交叉编译 CI | **500–800** | 200–300 | 可与 P1 并行（接口定稿后） |
+| **P2** Android 界面 | Gradle 骨架；Compose 界面（手柄下拉、音乐 / 按摩面板、14 个预设、各开关与滑块、手机 / 平板自适应）；中英文字符串；Kotlin 假引擎（5 种剧本）；授权流程界面；截图测试 | **2,000–2,800** | 300–500 | 不需要手柄，需要一台 Android 设备 |
+| **P3** Android 底层 | 前台服务 + 播放采集；JNI 桥（swift-java 生成 + 胶水）；A 档 `VibratorManager` / `LightsManager` / 扳机轴；C 档 AAudio 4 声道（Swift）+ USB 打开扬声器通路；B 档 `HidManager`；设备发现 / 身份 / 设置存储；调试入口 | **2,200–3,000** | 300–500 | 需要 Android 12+ 与 17 设备、DualSense、8BitDo；实物探测（§9 第 1–3 条）可能改变 C / B 档范围 |
+| **P4** Windows 界面 | **C# WinUI 3 / WPF**：界面 + 托盘 + C# 假引擎 + P/Invoke 绑定 | **2,000–2,600** | 200–300 | 若改用 **Compose Multiplatform 复用 P2 界面**：约 **500–900**（桌面适配、托盘、JNA 绑定、打包） |
+| （P5 Windows 底层，暂不做） | WASAPI 采集 / 输出、Win32 HID、SDL3、C 接口导出、打包 | 1,800–2,500 | 300 | 供参考 |
+
+**合计（P0a → P4）**：约 **9,000–12,300 行**新增 / 改动（Windows 界面复用 Compose 时约 **7,500–10,600 行**），约为现有代码量的 3 倍；其中 macOS 部分（P0a + P1）约 2,300–3,100 行。
+
