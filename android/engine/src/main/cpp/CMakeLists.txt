@@ -6,6 +6,6 @@ set(SWIFT_LIBS ${CMAKE_CURRENT_SOURCE_DIR}/../jniLibs/${ANDROID_ABI})
 add_library(ControllerCAPI SHARED IMPORTED)
 set_target_properties(ControllerCAPI PROPERTIES IMPORTED_LOCATION ${SWIFT_LIBS}/libControllerCAPI.so)
 
-add_library(cvjni SHARED cv_jni.c)
+add_library(cvjni SHARED cv_jni.c usb_audio.c)
 target_compile_options(cvjni PRIVATE -Wall -O2)
 target_link_libraries(cvjni ControllerCAPI aaudio log)

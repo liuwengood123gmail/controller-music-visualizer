@@ -199,7 +199,12 @@ class Session(
         val wantHD = effVibration && settings.hdEnabled && isDualSense && usb != null
         val wantSpeaker = effSpeaker
         if (wantHD || wantSpeaker) {
-            audio = ControllerAudio.open(context, core, wantHD) { why ->
+            // 先走系统音频（AAudio）；系统没把手柄登记成输出时，在 USB 直连上直接输出
+            val reasons = mutableListOf<String>()
+            audio = ControllerAudio.open(context, core, wantHD) { reasons += it }
+                ?: (link as? UsbDirectLink)?.let { l -> ControllerAudio.openUsb(core, wantHD, l) { reasons += it } }
+            if (audio == null) {
+                val why = reasons.joinToString("; ")
                 Log.w("cv-engine", "controller audio unavailable: $why")
                 if (wantSpeaker || link == null) error = Bilingual(
                     "无法以 4 声道打开手柄的 USB 音频（$why），HD 震动 / 扬声器不可用。",
@@ -333,7 +338,7 @@ class Session(
         if (a == null || !effSpeaker) { latency = null; audioStats = null; return }
         val margin = a.marginMs()
         latency = LatencyBreakdown(captureMs = captureLatencyMs() ?: 0.0, marginMs = margin, controllerOutputMs = a.outputMs)
-        audioStats = "4 ch · %d Hz · buffer %d · burst %d · margin %.1f ms · underruns %d · xruns %d · align %.0f ms"
-            .format(a.sampleRate, a.bufferFrames, a.burstFrames, margin, a.underruns(), a.xruns, alignDelayMs)
+        audioStats = "%s · 4 ch · %d Hz · buffer %d · burst %d · margin %.1f ms · underruns %d · xruns %d · align %.0f ms"
+            .format(a.backend, a.sampleRate, a.bufferFrames, a.burstFrames, margin, a.underruns(), a.xruns, alignDelayMs)
     }
 }

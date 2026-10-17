@@ -95,6 +95,27 @@ class NativeCoreTest {
         NativeCore.coreDestroy(core)
     }
 
+    /** USB 直接输出：模拟器上没有手柄，用管道代替 usbdevfs 句柄——提交失败要报告「已断开」，关闭不能卡住 */
+    @Test fun usbAudioLifecycle() {
+        val core = NativeCore.coreCreate(200f)
+        val r = NativeCore.rendererCreate(core, 48000f, true, Double.NaN, Double.NaN)
+        val info = IntArray(4)
+        // 每包 384 字节 > 端点 200 字节：拒绝
+        assertEquals(0L, NativeCore.usbAudioOpen(r, -1, 0x01, 200, 48000, 4, 3, info))
+        val pipe = android.os.ParcelFileDescriptor.createPipe()
+        val h = NativeCore.usbAudioOpen(r, pipe[1].fd, 0x01, 392, 48000, 4, 3, info)
+        assertNotEquals(0L, h)
+        assertEquals(listOf(4, 48000, 576, 144), info.toList())
+        val state = IntArray(3)
+        var tries = 0
+        do { Thread.sleep(10); NativeCore.usbAudioState(h, state) } while (state[0] == 0 && ++tries < 100)
+        assertEquals(1, state[0])
+        NativeCore.usbAudioClose(h)
+        pipe.forEach { it.close() }
+        NativeCore.rendererDestroy(r)
+        NativeCore.coreDestroy(core)
+    }
+
     @Test fun jsonHelpers() {
         val initial = ControllerSettings.fromJson(NativeCore.settingsInitial(null, ControllerSettings(enabled = false, intensity = 2f).toJson()))
         assertEquals(ControllerSettings(intensity = 2f), initial)

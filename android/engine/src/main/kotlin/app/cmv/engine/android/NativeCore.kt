@@ -65,6 +65,17 @@ object NativeCore {
     external fun audioState(h: Long, state: IntArray)
     external fun audioClose(h: Long)
 
+    /**
+     * 不经 Android 音频系统，直接往手柄的 USB 音频流接口发等时传输（usb_audio.c）。
+     * fd = UsbDeviceConnection.getFileDescriptor()，接口已占用并切到带端点的备用设置。
+     * info = [声道数, 采样率, 缓冲帧数, 每个 URB 的帧数]；失败返回 0
+     */
+    external fun usbAudioOpen(renderer: Long, fd: Int, endpoint: Int, maxPacket: Int, sampleRate: Int,
+                              urbs: Int, packets: Int, info: IntArray): Long
+    /** state = [已断开, 空档次数, 缓冲帧数] */
+    external fun usbAudioState(h: Long, state: IntArray)
+    external fun usbAudioClose(h: Long)
+
     external fun settingsInitial(remembered: String?, copying: String?): String
     external fun settingsApplyPatch(settings: String, patch: String): String
     external fun reconcile(json: String): String

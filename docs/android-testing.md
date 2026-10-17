@@ -39,6 +39,9 @@
 ### 3. HD 震动 + 手柄扬声器（USB）
 在第 2 步基础上：勾选「HD 震动」「手柄扬声器同步播放」，开始。
 - **预期**：引擎名「HD 震动（USB）+ 手柄扬声器」；震动更细腻（跟随音乐时载波就是音乐低频）；手柄扬声器同步出声，延迟小字和调试行有数字。
+- 实测（联想 TB320FC，Android 15）：系统把 DualSense 登记成「只有输入」（logcat：`UsbAlsaManager … hasOutput: false`），AAudio 找不到手柄。
+  这时 App 在 USB 直连上**直接输出**（等时传输，4 声道 16 位 48kHz，缓冲 12ms）：调试行开头显示 `USB direct`，`xruns` 是等时调度出现空档的次数。
+  logcat 里看 `cv-engine` 的「USB audio: interface …」和 `cv-native` 的「usb audio: endpoint …」。
 - 如果出现红字「无法以 4 声道打开手柄的 USB 音频（…）」：这台手机的 USB 音频不支持 4 声道，HD / 扬声器在这台机器上不可用——把红字里括号内的原因发给我。
 - 不授权直连时也可以试 HD（「HD 震动（USB，实验）」）：不发 HID 报告，直接往第 3/4 声道写，看会不会震。
 
