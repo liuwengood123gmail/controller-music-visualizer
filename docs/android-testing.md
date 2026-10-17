@@ -6,6 +6,10 @@
 
 ## 安装
 
+> 小米 / 红米：打开「USB 安装」要插 SIM 卡。不开也行——`adb push` 到 /sdcard/Download，再用
+> `adb shell am start -a android.intent.action.VIEW -t application/vnd.android.package-archive -d file:///sdcard/Download/<文件名>.apk`
+> 打开系统安装界面，手机上点一次「允许」（勾「记住我的选择」）+「安装」。
+
 1. 打开仓库的 Releases → **android-preview**（每次推送自动更新），手机上下载 `ControllerMusicVisualizer-android.apk`。
    也可以在 Actions 里某次运行的 Artifacts 下载（zip 里是同一个 APK）。
 2. 安装时允许「安装未知来源的应用」。要求 **Android 10+、arm64 手机 / 平板**；完整的系统震动 / 灯光要 **Android 12+**。
@@ -39,7 +43,7 @@
 ### 3. HD 震动 + 手柄扬声器（USB）
 在第 2 步基础上：勾选「HD 震动」「手柄扬声器同步播放」，开始。
 - **预期**：引擎名「HD 震动（USB）+ 手柄扬声器」；震动更细腻（跟随音乐时载波就是音乐低频）；手柄扬声器同步出声，延迟小字和调试行有数字。
-- 实测（联想 TB320FC，Android 15）：系统把 DualSense 登记成「只有输入」（logcat：`UsbAlsaManager … hasOutput: false`），AAudio 找不到手柄。
+- 实测（联想 TB320FC，Android 15；红米 Note 13 Pro+，Android 14 / 澎湃 OS 1.0，两台一样，应是 Android 原生行为）：系统把 DualSense 登记成「只有输入」（logcat：`UsbAlsaManager … hasOutput: false`），AAudio 找不到手柄。
   这时 App 在 USB 直连上**直接输出**（等时传输，4 声道 16 位 48kHz，缓冲 12ms）：调试行开头显示 `USB direct`，`xruns` 是等时调度出现空档的次数。
   logcat 里看 `cv-engine` 的「USB audio: interface …」和 `cv-native` 的「usb audio: endpoint …」。
 - 如果出现红字「无法以 4 声道打开手柄的 USB 音频（…）」：这台手机的 USB 音频不支持 4 声道，HD / 扬声器在这台机器上不可用——把红字里括号内的原因发给我。
