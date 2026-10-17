@@ -1,0 +1,10 @@
+{
+  "comment": "空对象 → 全部默认值",
+  "input": {},
+  "expected": {
+    "enabled": true, "source": "跟随音乐", "musicMode": "节拍", "sensitivity": 0.5, "responsiveness": 0.7,
+    "preset": "揉捏", "speed": 1, "intensity": 1, "vibrationEnabled": true, "hdEnabled": true,
+    "triggersEnabled": true, "triggerResistance": 0.5, "lightEffects": true, "lightSpeed": 0.3, "lightRange": 1,
+    "speakerEnabled": false, "speakerVolume": 0.3
+  }
+}
