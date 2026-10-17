@@ -30,3 +30,83 @@ jobs:
         run: swift build
       - name: Test ControllerCore
         run: swift test
+
+  # Android：Swift 核心交叉编译成 .so → Kotlin 单测（契约 / 假引擎）→ 打 APK → x86_64 模拟器上跑 JNI 测试和启动冒烟
+  android:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # 推到 master / Android 分支时更新 android-preview 预发布版（手机上直接下载 APK）
+    env:
+      SWIFT_VERSION: 6.3.3
+      SWIFT_ANDROID_SDK_SHA256: d160cc3206dd1886dae3fef2337af5e25ec034692cd0ec225721c56cc69da7f5
+      NDK_VERSION: 27.3.13750724
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Cache Swift toolchain
+        id: swift-cache
+        uses: actions/cache@v4
+        with:
+          path: /opt/swift
+          key: swift-${{ env.SWIFT_VERSION }}-ubuntu24.04
+      - name: Install Swift toolchain
+        if: steps.swift-cache.outputs.cache-hit != 'true'
+        run: |
+          sudo mkdir -p /opt/swift && sudo chown $USER /opt/swift
+          curl -sSL https://download.swift.org/swift-$SWIFT_VERSION-release/ubuntu2404/swift-$SWIFT_VERSION-RELEASE/swift-$SWIFT_VERSION-RELEASE-ubuntu24.04.tar.gz \
+            | tar xz -C /opt/swift --strip-components=1
+      - name: Install Android SDK packages
+        run: |
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-36" "platforms;android-37.2" "ndk;$NDK_VERSION" > /dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> $GITHUB_ENV
+      - name: Install Swift SDK for Android
+        run: |
+          /opt/swift/usr/bin/swift sdk install \
+            https://download.swift.org/swift-$SWIFT_VERSION-release/android-sdk/swift-$SWIFT_VERSION-RELEASE/swift-$SWIFT_VERSION-RELEASE_android.artifactbundle.tar.gz \
+            --checksum $SWIFT_ANDROID_SDK_SHA256
+          bash ~/.swiftpm/swift-sdks/swift-$SWIFT_VERSION-RELEASE_android.artifactbundle/swift-android/scripts/setup-android-sdk.sh
+      - name: Build Swift core for Android (arm64 + x86_64)
+        run: SWIFT=/opt/swift/usr/bin/swift ABIS="arm64-v8a x86_64" android/scripts/build-swift-android.sh
+      - name: Kotlin unit tests (contract fixtures, fake engine)
+        working-directory: android
+        run: ./gradlew --no-daemon :engine-api:test :engine-fake:test
+      - name: Build APK (arm64)
+        working-directory: android
+        run: |
+          ./gradlew --no-daemon :app:assembleRelease
+          mkdir -p ../dist && cp app/build/outputs/apk/release/app-release.apk ../dist/ControllerMusicVisualizer-android.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ControllerMusicVisualizer-android
+          path: dist/ControllerMusicVisualizer-android.apk
+      - name: Build emulator test APKs (x86_64)
+        working-directory: android
+        run: ./gradlew --no-daemon -Pcv.abis=arm64-v8a,x86_64 :app:assembleDebug :engine:assembleDebugAndroidTest
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
+      - name: Emulator tests (JNI + app launch)
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          working-directory: android
+          script: bash scripts/emulator-smoke.sh
+      - name: Publish android-preview pre-release
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/heads/claude/p2-p3-android'))
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git tag -f android-preview && git push -f origin android-preview
+          gh release view android-preview > /dev/null 2>&1 || \
+            gh release create android-preview --prerelease --title "Android 预览版 / Android preview" \
+              --notes "每次推送自动更新。下载 ControllerMusicVisualizer-android.apk 到手机安装（需允许安装未知来源的应用）。"
+          gh release upload android-preview dist/ControllerMusicVisualizer-android.apk --clobber
+          gh release edit android-preview --notes "提交 ${GITHUB_SHA::7}（${GITHUB_REF_NAME}）· 下载 ControllerMusicVisualizer-android.apk 到手机安装（需允许安装未知来源的应用）。"

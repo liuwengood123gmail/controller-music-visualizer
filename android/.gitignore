@@ -1,0 +1,9 @@
+.gradle/
+build/
+local.properties
+.idea/
+*.iml
+.kotlin/
+# Swift 交叉编译产物（scripts/build-swift-android.sh 生成）
+engine/src/main/jniLibs/
+.cxx/

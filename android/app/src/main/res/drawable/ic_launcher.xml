@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 简单的手柄图标 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp" android:height="48dp" android:viewportWidth="48" android:viewportHeight="48">
+    <path android:fillColor="#1E3A8A" android:pathData="M0,0h48v48h-48z" />
+    <path android:fillColor="#FFFFFF"
+        android:pathData="M14,16h20c4.4,0 8,3.6 8,8v4c0,3.3 -2.7,6 -6,6c-2,0 -3.8,-1 -4.9,-2.6L29.5,29h-11l-1.6,2.4C15.8,33 14,34 12,34c-3.3,0 -6,-2.7 -6,-6v-4C6,19.6 9.6,16 14,16z" />
+    <path android:fillColor="#1E3A8A" android:pathData="M13,21h2v3h3v2h-3v3h-2v-3h-3v-2h3z" />
+    <path android:fillColor="#38BDF8" android:pathData="M33,22m-1.6,0a1.6,1.6 0,1 1,3.2 0a1.6,1.6 0,1 1,-3.2 0" />
+    <path android:fillColor="#F472B6" android:pathData="M36.5,25.5m-1.6,0a1.6,1.6 0,1 1,3.2 0a1.6,1.6 0,1 1,-3.2 0" />
+</vector>
