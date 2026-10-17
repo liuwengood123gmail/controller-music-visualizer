@@ -6,6 +6,11 @@ import PackageDescription
 // ControllerMusicVisualizer：macOS App（SwiftUI 界面 + CoreAudio / IOKit / GameController 适配），只在 macOS 上构建。
 var targets: [Target] = [
     .target(name: "ControllerCore", path: "Sources/ControllerCore"),
+    // C 接口：Android（JNI 薄层）/ 以后 Windows（P/Invoke）调用核心用
+    .target(name: "ControllerCAPI", dependencies: ["ControllerCore"], path: "Sources/ControllerCAPI",
+            // 动态库默认没有 SONAME，链接它的 JNI 层会记下构建机上的绝对路径，装到手机上就找不到了
+            linkerSettings: [.unsafeFlags(["-Xlinker", "-soname=libControllerCAPI.so"], .when(platforms: [.android]))]),
+    .testTarget(name: "ControllerCAPITests", dependencies: ["ControllerCAPI", "ControllerCore"], path: "Tests/ControllerCAPITests"),
     .testTarget(name: "ControllerCoreTests", dependencies: ["ControllerCore"], path: "Tests/ControllerCoreTests"),
     // 不用 @testable：只通过公开接口调用，保证 macOS App（另一个模块）能用到的东西确实是 public 的
     .testTarget(name: "ControllerCoreAPITests", dependencies: ["ControllerCore"], path: "Tests/ControllerCoreAPITests"),
@@ -18,6 +23,10 @@ targets.append(.executableTarget(name: "ControllerMusicVisualizer", dependencies
 let package = Package(
     name: "ControllerMusicVisualizer",
     platforms: [.macOS("14.2")],
-    products: [.library(name: "ControllerCore", targets: ["ControllerCore"])],
+    products: [
+        .library(name: "ControllerCore", targets: ["ControllerCore"]),
+        // Android 打包进 APK 的 libControllerCAPI.so
+        .library(name: "ControllerCAPI", type: .dynamic, targets: ["ControllerCAPI"]),
+    ],
     targets: targets
 )

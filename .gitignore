@@ -3,3 +3,5 @@ build/
 .swiftpm/
 .DS_Store
 dualsense_test
+.build-android/
+dist/
