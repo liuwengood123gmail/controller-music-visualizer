@@ -1,7 +1,7 @@
 # Windows / Android 支持 · 调研与设计
 
 > 状态：**调研 + 设计**，尚未实现。目标：在现有 macOS 版的基础上支持 **Windows** 和 **Android 手机 / 平板**，**尽量复用现有代码**。
-> **已确定（2026-10）**：① **先做 Android**，Windows 往后排；② **界面与底层手柄连接分离**，两边按 §4.2 的「引擎接口」各自开发。
+> **已确定（2026-10）**：① **界面与底层手柄连接分离**，两边按 §4.2 的「引擎接口」各自开发；② 顺序：**先抽核心、定接口 → macOS 按接口改造并回归 → Android 界面 → Android 底层 → Windows 界面 → Windows 底层**（§8）。
 > 先读 README「设计思路」、[multi-controller-design.md](multi-controller-design.md)、[controller-speaker-design.md](controller-speaker-design.md)、[research/bluetooth-audio-findings.md](research/bluetooth-audio-findings.md)。
 > 标记：**[已证实]** 有链接或原文依据；**[推测]** 是推理，需要实物验证；**[待核实]** 来自记忆或二手资料。调研在云端完成，**没有在 Windows / Android 实机上验证任何东西**。
 
@@ -20,7 +20,9 @@
    - **系统声音采集**：`AudioPlaybackCapture`（Android 10+），需要用户每次同意屏幕录制、开前台服务；**只能采到允许被采集的 App**：用途为媒体 / 游戏 / 未知的音频，且该 App 没有退出采集 [已证实]。
 4. **最大的工作量不在新平台，而在第一步重构**：把核心抽成独立的 SwiftPM 目标、把平台相关的部分换成协议，**macOS 行为保持不变**。这一步做完，Windows 和 Android 只需各写一层「采集 / HID / 音频设备 / 界面」。
 5. **界面与底层分离**（§4.2）：底层是「引擎」，负责采集、分析、会话和全部手柄连接；界面只通过一个很小的引擎接口操作它。接口包括命令（开始 / 停止 / 改设置）、状态快照（低频）、电平（高频）和一次性事件。界面开发可以用「假引擎」，不需要手柄；引擎开发可以不写界面，用调试命令驱动。三个平台共用同一份接口定义：Android 是 Kotlin 接口，macOS 是 Swift 协议，Windows 是 C 接口 + JSON。
-6. 建议顺序（Android 优先，§8）：**P0 核心抽取 + 定接口 → P1 Android 实物探测 → P2 Android A 档（引擎 / 界面并行开发）→ P3 Android USB HD / 扬声器 → P4 Android 17 HID → P5 macOS 改用同一接口 → P6 Windows**。每一阶段都有可单独交付的产品。
+6. 顺序（§8）：**P0 抽核心 + 定接口 → P1 macOS 按接口改造（界面 + 底层），回归测试通过 → P2 Android 界面（配假引擎）→ P3 Android 底层 → P4 Windows 界面（配假引擎）→ P5 Windows 底层**。
+   - **macOS 先行**：它已有一套能用的底层，最适合检验接口是否够用。接口在 macOS 上跑通、回归通过后再交给 Android，返工最少。
+   - **界面先于底层**：界面只依赖接口和假引擎，不需要手柄。界面按引擎给出的能力显示 / 隐藏设置项，所以底层的实物探测结果不会阻塞界面开发。
 
 ## 1. 现有代码盘点：哪些能复用
 
@@ -257,9 +259,9 @@ data class ControllerInfo(
 
 | 平台 | 引擎 | 界面 | 两者之间 |
 |---|---|---|---|
-| Android | 前台服务里的单例：Kotlin 平台适配 + Swift 核心（JNI） | Compose，单独的 Gradle 模块，只依赖 `engine-api` | 同进程；Activity 绑定服务拿到 `ControllerEngine`；界面关掉后引擎继续跑，通知栏有「停止」按钮（发 `stop()` 命令） |
-| macOS（P5） | 现有 `AppModel` / `ControllerSession` 改造成实现 Swift 版 `ControllerEngine` 协议 | SwiftUI 只绑定协议给出的快照 | 同进程 |
-| Windows（P6） | Swift DLL | C# | C 接口：命令函数 + `cv_get_state(json)` / `cv_get_meters(buf)` 轮询，或回调 |
+| Android（P2 界面 / P3 底层） | 前台服务里的单例：Kotlin 平台适配 + Swift 核心（JNI） | Compose，单独的 Gradle 模块，只依赖 `engine-api` | 同进程；Activity 绑定服务拿到 `ControllerEngine`；界面关掉后引擎继续跑，通知栏有「停止」按钮（发 `stop()` 命令） |
+| macOS（P1） | 现有 `AppModel` / `ControllerSession` 改造成实现 Swift 版 `ControllerEngine` 协议 | SwiftUI 只绑定协议给出的快照 | 同进程 |
+| Windows（P4 界面 / P5 底层） | Swift DLL | C#（界面开发时配 C# 版假引擎） | C 接口：命令函数 + `cv_get_state(json)` / `cv_get_meters(buf)` 轮询，或回调 |
 
 ## 5. 核心抽取设计（P0 的具体内容）
 
@@ -437,18 +439,17 @@ android/
 
 | 阶段 | 内容 | 验收 | 依赖实物 |
 |---|---|---|---|
-| **P0 核心抽取 + 定接口** | ① 只**移动**纯逻辑文件到 `ControllerCore`，锁 / 原子计数改造，macOS 继续用现有会话代码（风险最小）；② 抽 `SessionEngine`、`DualSenseOutputController`、`ControllerAudioRenderer`、`SessionReconciler`，补引擎单元测试；③ 写好 §4.2 的接口（Kotlin `engine-api` + Swift 协议）和契约样例；④ CI：Linux 构建 + 测试核心，交叉编译 Android `.so` | 核心在 macOS / Linux CI 上测试全绿、能编出 Android `.so`；macOS App 行为不变；`engine-api` 评审通过 | 无（Mac 回归一次） |
-| **P1 Android 实物探测** | 两个最小测试 App：`VibratorManager` 100Hz 更新；AAudio 以 4 声道打开 USB DualSense 并在第 3/4 声道放正弦波 | 得到 §9 第 1、2 条的结论，决定 A 档的平滑策略、C 档是否可行 | Android 12+ 设备 + DualSense + USB-C 线 |
-| **P2 Android A 档**（两条线并行） | **界面线**：Compose 界面 + 假引擎（不需要手柄）。**引擎线**：前台服务、播放采集、Swift 核心经 JNI、`VibratorManager` / `LightsManager`、调试入口。两线只通过 `engine-api` 对接 | 手机 / 平板上 DualSense（USB / 蓝牙）和 8BitDo 跟随音乐 / 按摩震动、灯条跟随；界面在假引擎和真引擎下表现一致 | 同上 + 8BitDo |
-| **P3 Android USB HD / 扬声器（C 档）** | AAudio 4 声道 + 复用 `ControllerAudioRenderer`；扬声器用 `UsbManager` 打开通路 | Android 10+ 设备上 USB HD 工作；扬声器同步播放（若 4 声道可行） | Android 10+ 设备 |
-| **P4 Android 17 HID（B 档）** | `HidManager` / `HidDevice`：扳机阻尼、精确灯光、后台 L2/R2；测蓝牙 0x32 / 0x36 速率 | Android 17 设备上扳机阻尼工作；蓝牙 HD 视实测 | Android 17 设备 |
-| **P5 macOS 改用同一接口** | `AppModel` / `ControllerSession` 实现 Swift 版 `ControllerEngine`，SwiftUI 只绑定快照；电平改为单独的低频流 | macOS 行为不变（多手柄文档 §11、扬声器文档 §8 回归） | Mac + 手柄 |
-| **P6 Windows** | 原 P1 / P2：WASAPI、Win32 HID、4 声道输出、C# 外壳（同一接口的 C 版本）、蓝牙速率实测、SDL3 | 见 §6 | Windows PC + DualSense |
+| **P0 抽核心 + 定接口** | ① **移动**纯逻辑文件到 `ControllerCore`，锁 / 原子计数改造；② 抽 `SessionEngine`、`DualSenseOutputController`、`ControllerAudioRenderer`、`SessionReconciler`，补单元测试；③ 定 §4.2 的接口：Swift 协议 + Kotlin `engine-api`（先只写接口和数据类）+ 契约样例 JSON；④ CI：Linux 构建 + 测试核心，交叉编译 Android `.so` | 核心在 macOS / Linux CI 上测试全绿、能编出 Android `.so`；接口评审通过（定稿 `apiVersion = 1`）；macOS App 此时仍用旧代码，行为不变 | 无 |
+| **P1 macOS 按接口改造** | **底层**：`AppModel` / `ControllerSession` 改为基于 `SessionEngine` 等核心组件，实现 Swift 版 `ControllerEngine`。**界面**：SwiftUI 只绑定接口给出的快照 / 电平流 / 事件，改设置走补丁命令；附 Swift 版假引擎供 SwiftUI 预览。先写「新旧实现逐 tick 输出相同」的对照测试，再删旧代码 | **回归测试通过**：多手柄文档 §11、扬声器文档 §8 的清单逐条确认；界面在假引擎下也能完整操作。**接口如需调整，在这一阶段改完** | Mac + DualSense（USB / 蓝牙）+ 8BitDo |
+| **P2 Android 界面** | Gradle 工程骨架（§7.1 的模块）；`engine-api` 的 Kotlin 实现补全；Compose 界面（手机 / 平板自适应、双语）；Kotlin 版假引擎（剧本 + 模拟电平）；权限 / 授权流程的界面部分（MediaProjection 弹窗、USB / HID 授权提示） | 在假引擎的各个剧本下界面完整可用（无手柄、多手柄、蓝牙 / USB、授权被拒、运行中拔出）；截图测试 | Android 手机 / 平板（不需要手柄） |
+| **P3 Android 底层** | ① 先做两个实物探测（§9 第 1、2 条）；② A 档：前台服务、播放采集、Swift 核心经 JNI、`VibratorManager` / `LightsManager`、调试入口；③ C 档：USB 4 声道 HD + 扬声器；④ B 档：Android 17 `HidManager`（扳机阻尼、精确灯光、后台 L2/R2、蓝牙速率实测）。每一档做完就把 `app` 从假引擎切到真引擎验收 | A 档：DualSense（USB / 蓝牙）和 8BitDo 跟随音乐 / 按摩震动、灯条跟随；C 档：Android 10+ USB HD / 扬声器（若 4 声道可行）；B 档：Android 17 扳机阻尼。界面不需要为底层改动 | Android 12+ 设备、Android 17 设备、DualSense、8BitDo、USB-C 线 |
+| **P4 Windows 界面** | C#（WinUI 3 或 WPF）外壳 + 托盘；C# 版假引擎；对接 C 接口的绑定层 | 假引擎下界面完整可用 | Windows PC（不需要手柄） |
+| **P5 Windows 底层** | WASAPI 采集；Win32 HID（USB / 蓝牙）；4 声道输出（HD + 扬声器）；蓝牙 0x32 / 0x36 速率实测；SDL3 接其他手柄；导出 C 接口；打包 | 单个 / 两个 USB DualSense 全功能（音频设备对应正确）；蓝牙基础功能；8BitDo 震动；蓝牙 HD 视实测 | Windows PC + DualSense + 8BitDo |
 
 ## 9. 需要实物验证的问题（按对设计的影响排序）
 
 1. **Android：`VibratorManager` 能否以 100Hz 更新强度而不卡顿 / 不累积延迟**（决定 A 档能否「跟随音乐」）。写一个只含一个按钮的测试 App 即可。
-2. **Android USB：AAudio 能否以 4 声道打开 DualSense，后两个声道是否直接震**（决定低版本 Android 有没有 HD；与第 1 条一起在 P1 做）。
+2. **Android USB：AAudio 能否以 4 声道打开 DualSense，后两个声道是否直接震**（决定低版本 Android 有没有 HD；与第 1 条一起在 P3 开头做。手头有设备的话可以提前做，不影响界面开发）。
 3. **Android 17：`HidDevice.sendOutputReport` 能否发 DualSense 的 0x02 / 0x31，速率多少**（决定 B 档；蓝牙下顺便测 0x32 / 0x36 的速率，对照 macOS 的 ~5 KB/s）。
 4. **Windows 蓝牙：`WriteFile` 发 0x31 / 0x32 / 0x36 的速率**（把 `docs/research/bt-send-rate-probe.swift` 移植成 Windows 版，几十行）。≥ 94 包/秒 × 398 字节 → 蓝牙扬声器可行。
 5. **Windows USB：DualSense 音频端点的混音格式**（`GetMixFormat` 是不是 4 声道），以及第 3/4 声道在共享模式下能否驱动触觉（社区资料说能）。
@@ -462,8 +463,8 @@ android/
 - **Windows 界面用 C#** 引入第二种语言；但 C# 只做界面绑定，业务逻辑都在 Swift 核心里。
 - **第三方工具冲突**（Steam Input、DS4Windows、DSX）可能抢手柄；需要检测并在界面里提示。
 - **Android 后台限制**：不同厂商的省电策略可能杀掉前台服务 [推测]；需要引导用户把 App 加入电池优化白名单。
-- **P0 重构的回归风险**：会话、HID、音频渲染都要动。缓解：P0 第一步只移动纯逻辑文件；macOS 改用新引擎推迟到 P5，届时先给 `SessionEngine` 写「新旧实现逐 tick 输出相同」的对照测试，再删除旧代码。
-- **接口定早了会改**：`engine-api` 在 P2 两条线并行时最容易被频繁修改。缓解：P0 先评审一次；之后的改动走「先改契约样例和假引擎，再改真引擎」的顺序，并递增 `apiVersion`。
+- **重构的回归风险**：会话、HID、音频渲染都要动。缓解：P0 只移动和抽取、macOS 仍用旧代码；P1 改造时先写「新旧实现逐 tick 输出相同」的对照测试，再删旧代码，最后按清单做实物回归。
+- **接口定早了会改**：缓解：P0 评审定稿，P1 在 macOS 上用真实底层检验，有问题在 P1 内改完再交给 Android；之后的改动一律「先改契约样例和各平台假引擎，再改真引擎」，并递增 `apiVersion`。
 
 ## 11. 资料来源
 
