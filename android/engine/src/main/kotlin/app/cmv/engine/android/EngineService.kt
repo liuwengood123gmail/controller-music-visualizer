@@ -32,7 +32,8 @@ class EngineService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val engine = AndroidControllerEngine.get(this)
         when (intent?.action) {
-            ACTION_STOP -> { engine.stop(); return START_NOT_STICKY }
+            ACTION_STOP -> { engine.stopAndRelease(); return START_NOT_STICKY }
+            ACTION_PAUSED -> { paused = true; goForeground(projection = false); return START_NOT_STICKY }
             ACTION_PROJECTION -> {
                 goForeground(projection = true)
                 engine.onProjectionForeground()
@@ -44,6 +45,7 @@ class EngineService : Service() {
                 return START_NOT_STICKY
             }
         }
+        paused = false
         goForeground(projection = false)
         intent?.getStringExtra("cmd")?.let { cmd ->
             Log.i(AndroidControllerEngine.TAG, "debug command: $cmd")
@@ -53,6 +55,8 @@ class EngineService : Service() {
     }
 
     private var projectionType = false
+    /** 引擎已停止、只是保留着录屏授权（通知显示「已暂停」，按钮是「退出」） */
+    private var paused = false
 
     private fun goForeground(projection: Boolean) {
         projectionType = projectionType || projection
@@ -65,11 +69,12 @@ class EngineService : Service() {
         }
         val n: Notification = NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.ic_media_play)
-            .setContentTitle("手柄音乐可视化 · 运行中 / Running")
-            .setContentText("手柄正在跟随音乐或按摩 · Controllers are active")
+            .setContentTitle(if (paused) "手柄音乐可视化 · 已暂停 / Paused" else "手柄音乐可视化 · 运行中 / Running")
+            .setContentText(if (paused) "保留录屏授权，再次开始不用重新同意 · Screen capture kept for the next start"
+                            else "手柄正在跟随音乐或按摩 · Controllers are active")
             .setOngoing(true)
             .setContentIntent(open)
-            .addAction(android.R.drawable.ic_media_pause, "停止 / Stop", stop)
+            .addAction(android.R.drawable.ic_media_pause, if (paused) "退出 / Quit" else "停止 / Stop", stop)
             .build()
         var type = ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
         if (projectionType) type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
@@ -82,12 +87,18 @@ class EngineService : Service() {
         private const val ACTION_STOP = "app.cmv.STOP"
         private const val ACTION_PROJECTION = "app.cmv.PROJECTION"
         private const val ACTION_END = "app.cmv.END"
+        private const val ACTION_PAUSED = "app.cmv.PAUSED"
 
         fun start(context: Context) =
             ContextCompat.startForegroundService(context, Intent(context, EngineService::class.java))
 
         fun startProjection(context: Context) =
             ContextCompat.startForegroundService(context, Intent(context, EngineService::class.java).setAction(ACTION_PROJECTION))
+
+        /** 引擎停止但保留录屏授权：服务留在前台，通知改成「已暂停」 */
+        fun paused(context: Context) {
+            runCatching { context.startService(Intent(context, EngineService::class.java).setAction(ACTION_PAUSED)) }
+        }
 
         fun stop(context: Context) {
             runCatching { context.startService(Intent(context, EngineService::class.java).setAction(ACTION_END)) }

@@ -78,6 +78,8 @@ class AndroidControllerEngine(context: Context) : ControllerEngine {
     private var projection: MediaProjection? = null
     private var playback: PlaybackCapture? = null
     private var pendingConsent: CaptureConsent? = null
+    /** 停止后保留录屏授权的期限到了就释放（见 stopEngine） */
+    private var projectionRelease: ScheduledFuture<*>? = null
     private var ticker: ScheduledFuture<*>? = null
     private var lastTick = 0L
     private var frame = 0
@@ -128,6 +130,7 @@ class AndroidControllerEngine(context: Context) : ControllerEngine {
         }
         error = null
         running = true
+        projectionRelease?.cancel(false); projectionRelease = null
         EngineService.start(app)
         sessions.forEach { it.rumbleUpdateMs = options.rumbleUpdateMs; it.arm() }
         updateCapture()
@@ -136,16 +139,31 @@ class AndroidControllerEngine(context: Context) : ControllerEngine {
         publish()
     }
 
-    override fun stop() = post {
-        if (!running) return@post
-        running = false
-        ticker?.cancel(false); ticker = null
-        stopCapture()
-        notice = null
-        sessions.forEach { it.disarm() }
-        saveAll()
-        EngineService.stop(app)
-        _meters.value = emptyMap()
+    /** 界面的「停止」：录屏授权保留 PROJECTION_KEEP_MINUTES 分钟，期间再开始不用重新同意 */
+    override fun stop() = post { stopEngine(release = false) }
+
+    /** 通知栏的「停止 / 退出」：同时释放录屏授权、结束前台服务 */
+    internal fun stopAndRelease() = post { stopEngine(release = true) }
+
+    private fun stopEngine(release: Boolean) {
+        if (running) {
+            running = false
+            ticker?.cancel(false); ticker = null
+            pauseCapture()
+            notice = null
+            sessions.forEach { it.disarm() }
+            saveAll()
+            _meters.value = emptyMap()
+        }
+        if (release || projection == null) {
+            releaseProjection()
+        } else {
+            // 系统要求持有 MediaProjection 时前台服务一直在；通知改成「已暂停」，带「退出」按钮
+            EngineService.paused(app)
+            projectionRelease?.cancel(false)
+            projectionRelease = executor.schedule({ safely { if (!running) { releaseProjection(); publish() } } },
+                                                  PROJECTION_KEEP_MINUTES, TimeUnit.MINUTES)
+        }
         publish()
     }
 
@@ -216,17 +234,16 @@ class AndroidControllerEngine(context: Context) : ControllerEngine {
                 ?: throw IllegalStateException("getMediaProjection returned null")
             p.registerCallback(object : MediaProjection.Callback() {
                 override fun onStop() = post {
-                    if (projection === p) { projection = null; stopCapture(); if (running) captureFailed(Bilingual("屏幕录制已被系统停止", "Screen capture was stopped by the system")) }
+                    if (projection !== p) return@post
+                    projection = null
+                    stopCapture()
+                    // 用户在状态栏停止了共享：运行中按采集失败处理；已停止时直接结束前台服务
+                    if (running) captureFailed(Bilingual("屏幕录制已被系统停止", "Screen capture was stopped by the system"))
+                    else { projectionRelease?.cancel(false); projectionRelease = null; EngineService.stop(app); publish() }
                 }
             }, main)
             projection = p
-            NativeCore.coreReset(core)
-            val c = PlaybackCapture(p, core) { why -> post { captureFailed(Bilingual("读取系统声音出错：$why", "Audio capture error: $why")) } }
-            c.start()
-            playback = c
-            capture = CaptureStatus.Running
-            notice = null
-            sessions.forEach { it.refreshLatency() }
+            startPlayback(p)
         } catch (t: Throwable) {
             Log.e(TAG, "capture start failed", t)
             captureFailed(Bilingual("无法读取系统声音：${t.message}", "Cannot read system audio: ${t.message}"))
@@ -255,10 +272,17 @@ class AndroidControllerEngine(context: Context) : ControllerEngine {
 
     private val needsAudio get() = running && sessions.any { it.needsAudio }
 
-    /** 需要系统声音时请界面去征得同意；采集一旦起来，运行期间就保持（每次重新申请都要用户再点一次同意） */
+    /**
+     * 需要系统声音时：手上还有录屏授权（上次停止后保留的）就直接用，否则请界面去征得同意。
+     * 采集一旦起来，运行期间就保持（每次重新申请都要用户再点一次同意）
+     */
     private fun updateCapture() {
         if (needsAudio && capture == CaptureStatus.Off) {
-            capture = CaptureStatus.NeedsConsent
+            val p = projection
+            if (p == null || !runCatching { startPlayback(p) }.onFailure { Log.w(TAG, "reuse projection failed", it) }.isSuccess) {
+                if (p != null) { projection = null; runCatching { p.stop() } }
+                capture = CaptureStatus.NeedsConsent
+            }
         } else if (!needsAudio && capture == CaptureStatus.NeedsConsent) {
             capture = CaptureStatus.Off
         }
@@ -270,6 +294,31 @@ class AndroidControllerEngine(context: Context) : ControllerEngine {
         error = Bilingual("${reason.zh}。跟随音乐不可用（按摩照常）；停止后重新开始可以再试一次。",
                           "${reason.en}. Music mode is unavailable (massage still works); stop and start again to retry.")
         publish()
+    }
+
+    /** 用已有的录屏授权开始读取系统声音（失败抛异常） */
+    private fun startPlayback(p: MediaProjection) {
+        NativeCore.coreReset(core)
+        val c = PlaybackCapture(p, core) { why -> post { captureFailed(Bilingual("读取系统声音出错：$why", "Audio capture error: $why")) } }
+        c.start()
+        playback = c
+        capture = CaptureStatus.Running
+        notice = null
+        sessions.forEach { it.refreshLatency() }
+    }
+
+    /** 停止读取系统声音，录屏授权保留 */
+    private fun pauseCapture() {
+        playback?.stop(); playback = null
+        pendingConsent = null
+        capture = CaptureStatus.Off
+    }
+
+    /** 释放录屏授权并结束前台服务 */
+    private fun releaseProjection() {
+        projectionRelease?.cancel(false); projectionRelease = null
+        stopCapture()
+        EngineService.stop(app)
     }
 
     private fun stopCapture() {
@@ -389,6 +438,8 @@ class AndroidControllerEngine(context: Context) : ControllerEngine {
 
     companion object {
         const val TAG = "cv-engine"
+        /** 停止后录屏授权保留多久（期间再开始不用重新同意；状态栏会一直显示共享图标） */
+        const val PROJECTION_KEEP_MINUTES = 30L
         const val ACTION_USB_PERMISSION = "app.cmv.USB_PERMISSION"
 
         @Volatile private var instance: AndroidControllerEngine? = null
