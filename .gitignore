@@ -5,3 +5,7 @@ build/
 dualsense_test
 .build-android/
 dist/
+native-win/bin/
+native-win/obj/
+native-win/out/
+native-win/build/

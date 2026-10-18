@@ -127,6 +127,8 @@ Swift 核心里的规则（每 tick 的计算、报告构造、对账、对齐�
 - `androidMain`：屏幕录制授权弹窗（`MediaProjectionManager`）、运行时权限（录音 / 通知 / HID）、`LanguageStore`（SharedPreferences）。
 - `desktopMain`：没有采集授权（WASAPI 环回不需要），`CaptureStatus.NeedsConsent` 不会出现；`LanguageStore` 用 `java.util.prefs.Preferences`；`collectAsStateWithLifecycle` 换成 `collectAsState`（或用 JetBrains 的多平台 lifecycle 库）。
 - 做法：把 Android 专有调用收进几个 `expect` 函数（`CaptureConsentFlow`、`PermissionEvents`、`rememberStartWithPermissions`、`LanguageStore`），两边 `actual`。Desktop 版窗口宽度 ≥ 720dp 时自动是两栏布局（现有逻辑）。
+- **实际做法（W3）**：没用 `commonMain` + `expect/actual`。两个目标都是 JVM，共享代码放在 `ui/src/shared/kotlin`，同时加进 `androidMain` 和 `desktopMain` 的源码目录；平台部分是 `androidMain/…/Platform.kt` 和 `desktopMain/…/Platform.kt` 里签名相同的 `internal` 函数（`collectUiState`、`rememberLanguagePrefs`、`captureRunningHint`、`CaptureConsentFlow`、`PermissionEvents`、`rememberStartWithPermissions`）。好处：共享代码可以直接用 JVM 库（`engine-api` 是 JVM 模块、`String.format`、`java.util.Locale`），不用改界面代码。Compose Multiplatform 1.12.2（material3 1.9.0），Kotlin 2.3.21。
+- **依赖**：`androidMain` 照旧用 androidx + `compose-bom`（和改 KMP 之前一模一样），只有 `desktopMain` 用 JetBrains 的构件。原因：CMP 1.12 在 Android 上会带进 androidx compose 1.12.1，它要求 AGP 9.1，而本项目是 AGP 8.13.2（CI 的 `checkReleaseAarMetadata` 实际报过这个错）。
 
 ### 2.5 Desktop 应用（`desktop/`）
 
@@ -174,9 +176,17 @@ git checkout -b claude/p4-p5-windows
 
 swift build                    # 核心 + C 接口（macOS 目标在 Windows 上自动跳过）
 swift test                     # 145 个测试，应全部通过（W2 要确认的第一件事）
+native-win\scripts\build-swift.ps1   # release DLL + Swift 运行库 → native-win\out\x64
 cd android
-.\gradlew.bat :engine-api:test :engine-fake:test   # 纯 Kotlin 部分，不需要 Android SDK
+.\gradlew.bat -PdesktopOnly :engine-api:test :engine-fake:test   # 纯 Kotlin 部分；-PdesktopOnly 时不需要 Android SDK
 ```
+
+实测注意（Windows 11 + Swift 6.4.1）：
+- `swift` 必须在 VS x64 环境里跑（缺 `link.exe` 会报 toolchain is invalid）；`build-swift.ps1` 自己导入 vcvars。
+- 装完 Swift / JDK 后**新开终端**：旧终端里没有 `SDKROOT`（报 unable to load standard library）和 `JAVA_HOME`。
+- 没开「开发者模式」时 SwiftPM 建不了 `.build\release` 符号链接（只是警告）；产物实际在 `.build\out\Products\Release-windows-x86_64\`。
+- 6.4.1 编译时有一堆 `wchar_t ... broken by a context change` 警告，来自工具链自带的 WinSDK 模块，不是项目代码，可忽略。
+- Release 版 `ControllerCAPI.dll` 导出全部 36 个 `cv_*`（与 `controller_core.h` 一致），不需要额外导出设置；连同运行库共 19 个 DLL、约 58MB（运行库目录自带 `VCRUNTIME140` / `MSVCP140`，一起拷了）。
 
 ## 4. 开发步骤
 
@@ -300,14 +310,19 @@ JRE（jlink 精简）约 50–70MB + Swift 运行库约 60MB（其中 ICU 约 30
 
 ## 7. 实测记录（W1 起在这里补）
 
+实测环境：Windows 11 Pro 26200，DualSense（PID 0x0CE6）USB 连接，探测程序 `native-win/probe/`（`probe list|hid|hd|speaker [振幅]`）。
+
 | 项目 | 结果 |
 |---|---|
-| DualSense 音频端点混音格式 | 待测 |
-| HID 与音频端点 ContainerId 是否一致 | 待测 |
-| USB 共享模式第 3/4 声道能否驱动 HD | 待测 |
-| USB 输入报告速率 | 待测 |
-| 蓝牙 0x31 发送速率 | 待测 |
-| 环回采集延迟（周期 / 缓冲） | 待测 |
+| DualSense 音频端点混音格式 | 共享模式 **4 声道、48kHz、32 位 float，`dwChannelMask=0x33`**（FL/FR/BL/BR），名字 `Speakers (DualSense Wireless Controller)`，与 macOS 布局相同 |
+| HID 与音频端点 ContainerId 是否一致 | **一致**（HID 用 `CM_Get_DevNode_PropertyW(DEVPKEY_Device_ContainerId)`，端点用属性库里的同一个键）。HID 接口是 `mi_03`，报告长度 in=64 / out=48 |
+| USB 共享模式第 3/4 声道能否驱动 HD | **能**。先发 flag0 bit0–1 和字节 38 清零的 0x02 报告，再往第 3/4 声道写 80Hz 正弦，手感正常 |
+| HID 0x02 输出 | `WriteFile`（重叠 I/O）28/28 成功；灯条、兼容震动、恢复默认都正常 |
+| USB 输入报告速率 | **250 个/秒**；L2/R2（字节 5/6）读数正常 |
+| 扬声器 | **能**（路径 3、音量 0x64、前置放大 2，第 1/2 声道 1kHz）。**注意**：这台机器上 DualSense 端点的 Windows 音量是 0%（-100dB），扬声器几乎无声；音量调到 100% 后正常。HD 在 0% 时照样正常 → 端点音量只作用于扬声器声道，不影响触觉声道。**已定**：引擎**不**自动改端点音量；开扬声器时如果端点音量很低或静音，界面提示用户去声音设置里调（W6 实现） |
+| 蓝牙 0x31 发送速率 | 待测（需要蓝牙连接） |
+| 环回采集延迟（周期 / 缓冲） | 待测（W5） |
+| 冲突软件 | 机器上装了 Steam（有 Steam Streaming 虚拟声卡）；Steam 未运行时 HID 读写正常 |
 
 ## 8. 在 Windows 机器上让 Claude 做的话
 

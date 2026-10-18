@@ -1,6 +1,5 @@
 package app.cmv.ui
 
-import android.content.Context
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -20,20 +19,12 @@ fun L(zh: String, en: String): String = if (LocalLanguage.current == Language.ZH
 @Composable @ReadOnlyComposable
 fun Bilingual.text(): String = text(LocalLanguage.current)
 
-/** 语言选择存在界面自己的 SharedPreferences 里；未选择时跟随系统语言 */
-object LanguageStore {
-    private const val PREFS = "ui"
-    private const val KEY = "language"
-
-    fun load(context: Context): Language {
-        val saved = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY, null)
-        return Language.entries.firstOrNull { it.name == saved }
-            ?: if (Locale.getDefault().language == "zh") Language.ZH else Language.EN
-    }
-
-    fun save(context: Context, language: Language) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY, language.name).apply()
-    }
+/** 语言选择的存储（平台实现见 Platform.kt：Android 用 SharedPreferences，桌面用 java.util.prefs）；未选择时跟随系统语言 */
+internal interface LanguagePrefs {
+    fun loadSaved(): String?
+    fun save(language: Language)
+    fun load(): Language = Language.entries.firstOrNull { it.name == loadSaved() }
+        ?: if (Locale.getDefault().language == "zh") Language.ZH else Language.EN
 }
 
 val Source.title: Bilingual
